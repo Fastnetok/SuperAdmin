@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.superadmin.dashboard
+package com.example.superadmin.superadmin.dashboard
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
@@ -7,7 +7,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.activity.viewModels
 import android.widget.TextView
-import com.example.eboneadminpanel.R
+import com.example.superadmin.R
 
 class SuperDashboardActivity : AppCompatActivity() {
 

@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.models
+package com.example.superadmin.models
 
 data class Company(
     var companyId: String = "",

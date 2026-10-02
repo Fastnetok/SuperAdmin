@@ -1,10 +1,10 @@
-package com.example.eboneadminpanel.superadmin.dashboard
+package com.example.superadmin.superadmin.dashboard
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.example.eboneadminpanel.models.Company
-import com.example.eboneadminpanel.repositories.CompanyRepository
+import com.example.superadmin.models.Company
+import com.example.superadmin.repositories.CompanyRepository
 
 class DashboardViewModel : ViewModel() {
 

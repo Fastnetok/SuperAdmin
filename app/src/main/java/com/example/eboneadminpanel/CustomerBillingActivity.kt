@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import android.content.Intent
 import android.graphics.Color
@@ -12,9 +12,9 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.example.eboneadminpanel.databinding.ActivityCustomerBillingBinding
-import com.example.eboneadminpanel.databinding.ItemNetworkRowBinding
-import com.example.eboneadminpanel.databinding.ItemTransactionRowBinding
+import com.example.superadmin.databinding.ActivityCustomerBillingBinding
+import com.example.superadmin.databinding.ItemNetworkRowBinding
+import com.example.superadmin.databinding.ItemTransactionRowBinding
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration

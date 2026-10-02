@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "133465084190",
-    "project_id": "ebone-admin-panel",
-    "storage_bucket": "ebone-admin-panel.firebasestorage.app"
+    "project_number": "693272934527",
+    "project_id": "superadmin-9a853",
+    "storage_bucket": "superadmin-9a853.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:133465084190:android:1c70425fe7652e43d6390f",
+        "mobilesdk_app_id": "1:693272934527:android:bb1360100135f969a1e74a",
         "android_client_info": {
-          "package_name": "com.example.eboneadminpanel"
+          "package_name": "com.example.superadmin"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBr-xr3gO46WTzEEmhQdRSODwgpoPptxCw"
+          "current_key": "AIzaSyCDiZa8dL7mV8Vb4CwTR_FkvDuHsUPshxk"
         }
       ],
       "services": {

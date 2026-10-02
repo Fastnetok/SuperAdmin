@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.ui.theme
+package com.example.superadmin.ui.theme
 
 import android.app.Activity
 import android.os.Build

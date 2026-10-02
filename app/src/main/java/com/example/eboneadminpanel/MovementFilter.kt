@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 // Admin-side safety net. The Employee app already filters bad points
 // (LocationTrackingHistory.kt), but this protects against old data saved

@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot

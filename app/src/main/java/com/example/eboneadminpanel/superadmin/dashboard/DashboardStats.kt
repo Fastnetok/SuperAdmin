@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.superadmin.dashboard
+package com.example.superadmin.superadmin.dashboard
 
 data class DashboardStats(
     var totalCompanies: Int = 0,

@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 // Mirrors one entry under tracking/{employeeId}/{date}/{timestamp} in Firebase
 data class MovementPoint(

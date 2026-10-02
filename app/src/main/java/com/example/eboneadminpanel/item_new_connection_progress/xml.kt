@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.item_new_connection_progress
+package com.example.superadmin.item_new_connection_progress
 
 class xml {
 }

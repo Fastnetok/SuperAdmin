@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Ebone Admin Panel"
+rootProject.name = "SuperAdmin"
 include(":app")
  

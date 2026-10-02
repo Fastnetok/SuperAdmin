@@ -1,12 +1,12 @@
-package com.example.eboneadminpanel.superadmin.companymanager
+package com.example.superadmin.superadmin.companymanager
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.example.eboneadminpanel.core.Constants
-import com.example.eboneadminpanel.models.Company
-import com.example.eboneadminpanel.repositories.CompanyRepository
-import com.example.eboneadminpanel.utils.CompanyIdGenerator
+import com.example.superadmin.core.Constants
+import com.example.superadmin.models.Company
+import com.example.superadmin.repositories.CompanyRepository
+import com.example.superadmin.utils.CompanyIdGenerator
 
 class CompanyViewModel : ViewModel() {
 

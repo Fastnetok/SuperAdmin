@@ -1,6 +1,6 @@
-package com.example.eboneadminpanel.utils
+package com.example.superadmin.utils
 
-import com.example.eboneadminpanel.core.FirestorePaths
+import com.example.superadmin.core.FirestorePaths
 import com.google.firebase.firestore.FirebaseFirestore
 
 object CompanyIdGenerator {

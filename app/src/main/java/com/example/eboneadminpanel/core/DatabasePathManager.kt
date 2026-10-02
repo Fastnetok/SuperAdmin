@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.core
+package com.example.superadmin.core
 
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase

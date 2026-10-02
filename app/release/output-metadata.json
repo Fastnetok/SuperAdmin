@@ -4,7 +4,7 @@
     "type": "APK",
     "kind": "Directory"
   },
-  "applicationId": "com.example.eboneadminpanel",
+  "applicationId": "com.example.superadmin",
   "variantName": "release",
   "elements": [
     {

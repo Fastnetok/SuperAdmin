@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 // Firebase requires a no-argument constructor for automatic deserialization,
 // which is why every field has a default value below.

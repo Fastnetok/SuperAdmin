@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.core
+package com.example.superadmin.core
 
 import android.content.Context
 import android.content.SharedPreferences

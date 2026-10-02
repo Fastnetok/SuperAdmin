@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import kotlin.math.atan2
 import kotlin.math.cos

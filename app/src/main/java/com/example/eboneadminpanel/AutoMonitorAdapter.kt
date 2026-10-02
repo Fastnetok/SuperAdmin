@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import android.graphics.Color
 import android.view.LayoutInflater

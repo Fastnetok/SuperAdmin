@@ -166,7 +166,7 @@
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
 
-                    <com.example.eboneadminpanel.DonutChartView
+                    <com.example.superadmin.DonutChartView
                         android:id="@+id/donutChart"
                         android:layout_width="120dp"
                         android:layout_height="120dp" />

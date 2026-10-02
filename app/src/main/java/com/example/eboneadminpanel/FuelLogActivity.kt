@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import android.app.AlertDialog
 import android.app.DatePickerDialog

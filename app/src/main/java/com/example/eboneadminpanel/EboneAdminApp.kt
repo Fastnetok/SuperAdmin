@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import android.app.Activity
 import android.app.Application
@@ -115,7 +115,7 @@ class EboneAdminApp : Application() {
     override fun onCreate() {
         super.onCreate()
         com.google.firebase.FirebaseApp.initializeApp(this)
-        db = FirebaseDatabase.getInstance()
+        db = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
         createNotificationChannel()
 
         // NEW: start the foreground auto-disable poll loop. It self

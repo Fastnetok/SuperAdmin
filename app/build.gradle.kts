@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.eboneadminpanel"
+    namespace = "com.example.superadmin"
 
     compileSdk = 36
 
@@ -35,7 +35,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.eboneadminpanel"
+        applicationId = "com.example.superadmin"
         minSdk = 24
         targetSdk = 36
         versionCode = 60

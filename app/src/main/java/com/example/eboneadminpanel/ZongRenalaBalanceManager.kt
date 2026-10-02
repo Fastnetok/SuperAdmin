@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

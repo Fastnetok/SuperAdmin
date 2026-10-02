@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.superadmin.companymanager
+package com.example.superadmin.superadmin.companymanager
 
 object CompanyValidator {
 

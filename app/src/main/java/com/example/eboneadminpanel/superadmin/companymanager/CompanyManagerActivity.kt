@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.superadmin.companymanager
+package com.example.superadmin.superadmin.companymanager
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
@@ -9,7 +9,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import android.widget.Button
-import com.example.eboneadminpanel.R
+import com.example.superadmin.R
 
 class CompanyManagerActivity : AppCompatActivity() {
 

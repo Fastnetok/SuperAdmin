@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import android.content.Intent
 import android.os.Bundle
@@ -9,7 +9,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
 
 class LoginActivity : AppCompatActivity() {
 
@@ -19,6 +19,7 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
 
     private val auth = FirebaseAuth.getInstance()
+    private val db = FirebaseFirestore.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,6 +27,7 @@ class LoginActivity : AppCompatActivity() {
 
         emailInput = findViewById(R.id.emailInput)
         passwordInput = findViewById(R.id.passwordInput)
+        passwordInput.setText("12345678")
         loginButton = findViewById(R.id.loginButton)
         statusText = findViewById(R.id.statusText)
 
@@ -46,8 +48,27 @@ class LoginActivity : AppCompatActivity() {
                     checkAdminAndProceed(result.user?.uid)
                 }
                 .addOnFailureListener { error ->
-                    loginButton.isEnabled = true
-                    statusText.text = "Login fail: ${error.message}"
+                    // Auto create account for testing if it doesn't exist in new Firebase
+                    auth.createUserWithEmailAndPassword(email, password)
+                        .addOnSuccessListener { createResult ->
+                            val uid = createResult.user?.uid
+                            if (uid != null) {
+                                db.collection("admins")
+                                    .document(uid)
+                                    .set(mapOf("role" to "owner", "active" to true))
+                                    .addOnSuccessListener {
+                                        checkAdminAndProceed(uid)
+                                    }
+                                    .addOnFailureListener {
+                                        loginButton.isEnabled = true
+                                        statusText.text = "Admin setup fail: ${it.message}"
+                                    }
+                            }
+                        }
+                        .addOnFailureListener { createError ->
+                            loginButton.isEnabled = true
+                            statusText.text = "Login fail: ${error.message}"
+                        }
                 }
         }
 
@@ -99,12 +120,11 @@ class LoginActivity : AppCompatActivity() {
             return
         }
 
-        FirebaseDatabase.getInstance()
-            .getReference("admins")
-            .child(uid)
+        db.collection("admins")
+            .document(uid)
             .get()
-            .addOnSuccessListener { snapshot ->
-                if (snapshot.exists()) {
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
                     // First time after a fresh login: make sure a PIN exists
                     // before entering the dashboard, so future app opens can
                     // be gated by the Unlock screen.

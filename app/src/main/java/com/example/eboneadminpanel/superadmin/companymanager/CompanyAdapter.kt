@@ -1,12 +1,12 @@
-package com.example.eboneadminpanel.superadmin.companymanager
+package com.example.superadmin.superadmin.companymanager
 
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import com.example.eboneadminpanel.R
-import com.example.eboneadminpanel.models.Company
+import com.example.superadmin.R
+import com.example.superadmin.models.Company
 
 class CompanyAdapter(
     private var companies: List<Company>,

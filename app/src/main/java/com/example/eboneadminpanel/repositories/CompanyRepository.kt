@@ -1,7 +1,7 @@
-package com.example.eboneadminpanel.repositories
+package com.example.superadmin.repositories
 
-import com.example.eboneadminpanel.core.FirestorePaths
-import com.example.eboneadminpanel.models.Company
+import com.example.superadmin.core.FirestorePaths
+import com.example.superadmin.models.Company
 import com.google.firebase.firestore.FirebaseFirestore
 
 class CompanyRepository {

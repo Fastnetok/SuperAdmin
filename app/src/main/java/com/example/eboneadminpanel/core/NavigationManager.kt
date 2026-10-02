@@ -1,9 +1,9 @@
-package com.example.eboneadminpanel.core
+package com.example.superadmin.core
 
 import android.app.Activity
 import android.content.Intent
-import com.example.eboneadminpanel.MainActivity
-import com.example.eboneadminpanel.superadmin.dashboard.SuperDashboardActivity
+import com.example.superadmin.MainActivity
+import com.example.superadmin.superadmin.dashboard.SuperDashboardActivity
 
 object NavigationManager {
 

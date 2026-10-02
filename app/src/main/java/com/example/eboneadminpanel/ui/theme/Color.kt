@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.ui.theme
+package com.example.superadmin.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

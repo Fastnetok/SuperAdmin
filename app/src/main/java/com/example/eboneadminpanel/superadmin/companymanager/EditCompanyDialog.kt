@@ -1,12 +1,12 @@
-package com.example.eboneadminpanel.superadmin.companymanager
+package com.example.superadmin.superadmin.companymanager
 
 import android.app.AlertDialog
 import android.content.Context
 import android.view.LayoutInflater
 import android.widget.EditText
 import android.widget.Toast
-import com.example.eboneadminpanel.R
-import com.example.eboneadminpanel.models.Company
+import com.example.superadmin.R
+import com.example.superadmin.models.Company
 
 object EditCompanyDialog {
 

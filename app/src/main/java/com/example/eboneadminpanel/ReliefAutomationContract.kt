@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 /**
  * Central contract for the Relief Automation system.

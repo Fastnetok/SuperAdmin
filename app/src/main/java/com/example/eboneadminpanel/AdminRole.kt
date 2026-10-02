@@ -1,10 +1,7 @@
-package com.example.eboneadminpanel
+package com.example.superadmin
 
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.ValueEventListener
+import com.google.firebase.firestore.FirebaseFirestore
 
 object AdminRole {
 
@@ -18,19 +15,20 @@ object AdminRole {
             return
         }
 
-        FirebaseDatabase.getInstance()
-            .getReference("admins")
-            .child(uid)
-            .child("role")
-            .addListenerForSingleValueEvent(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    onResult(snapshot.getValue(String::class.java))
-                }
-
-                override fun onCancelled(error: DatabaseError) {
+        FirebaseFirestore.getInstance()
+            .collection("admins")
+            .document(uid)
+            .get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    onResult(document.getString("role") ?: "owner")
+                } else {
                     onResult(null)
                 }
-            })
+            }
+            .addOnFailureListener {
+                onResult(null)
+            }
     }
 
     fun canManageFuel(role: String?): Boolean {

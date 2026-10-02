@@ -1,4 +1,4 @@
-package com.example.eboneadminpanel.update
+package com.example.superadmin.update
 
 class UpdateDialog {
 }
