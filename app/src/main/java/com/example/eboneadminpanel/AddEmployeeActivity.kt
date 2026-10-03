@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -43,6 +44,10 @@ class AddEmployeeActivity : AppCompatActivity() {
 
         generateNewPin()
 
+        val roles = arrayOf("employee", "manager", "supervisor", "dealer")
+        val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, roles)
+        binding.spinnerRole.adapter = spinnerAdapter
+
         binding.btnBack.setOnClickListener { finish() }
         binding.btnRegeneratePin.setOnClickListener { generateNewPin() }
         binding.btnSaveEmployee.setOnClickListener { saveEmployee() }
@@ -74,8 +79,10 @@ class AddEmployeeActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
 
+                val selectedRole = binding.spinnerRole.selectedItem.toString().lowercase()
                 val data = mapOf(
                     "employeeName" to employeeName,
+                    "role" to selectedRole,
                     "status" to "PENDING",
                     "linkedAndroidId" to null,
                     "linkedUid" to null,

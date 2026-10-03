@@ -30,7 +30,20 @@ class CompanyViewModel : ViewModel() {
         })
     }
 
-    fun addNewCompany(companyName: String, city: String, ownerName: String) {
+    fun addNewCompany(
+        companyName: String,
+        city: String,
+        ownerName: String,
+        adminEmail: String,
+        adminPassword: String,
+        maxManagers: Int,
+        maxSupervisors: Int,
+        maxEmployees: Int,
+        maxCustomers: Int,
+        maxDealers: Int,
+        licenseStatus: String,
+        licenseExpiry: Long
+    ) {
         val cityPrefix = Constants.CITY_PREFIXES[city] ?: city.take(3).uppercase()
 
         CompanyIdGenerator.generateNextId(cityPrefix, object : CompanyIdGenerator.IdGeneratedCallback {
@@ -40,7 +53,15 @@ class CompanyViewModel : ViewModel() {
                     companyName = companyName,
                     city = city,
                     ownerName = ownerName,
-                    licenseStatus = Constants.LICENSE_ACTIVE,
+                    adminEmail = adminEmail,
+                    adminPassword = adminPassword,
+                    maxManagers = maxManagers,
+                    maxSupervisors = maxSupervisors,
+                    maxEmployees = maxEmployees,
+                    maxCustomers = maxCustomers,
+                    maxDealers = maxDealers,
+                    licenseStatus = licenseStatus,
+                    licenseExpiry = licenseExpiry,
                     createdAt = System.currentTimeMillis()
                 )
 

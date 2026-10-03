@@ -15,9 +15,21 @@
             android:layout_height="100dp"
             android:background="#0D47A1"
             android:gravity="center"
-            android:text="ADMIN MENU"
+            android:text="SUPERADMIN MENU"
             android:textColor="#FFFFFF"
             android:textSize="24sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/menuManageCompanies"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:background="#E3F2FD"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="🏢 SuperAdmin: Manage Companies"
+            android:textColor="#0D47A1"
+            android:textSize="18sp"
             android:textStyle="bold"/>
 
         <TextView
@@ -62,7 +74,7 @@
             android:layout_height="55dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
-            android:text="Add Employee"
+            android:text="Admin Management"
             android:textSize="18sp"/>
 
         <TextView

@@ -3,40 +3,67 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="12dp"
-    android:layout_marginBottom="8dp"
-    android:background="#F5F5F5">
+    android:padding="16dp"
+    android:layout_marginBottom="10dp"
+    android:background="#FFFFFF">
 
-    <TextView
-        android:id="@+id/tvCompanyName"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Company Name"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvCompanyName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Company Name"
+            android:textSize="18sp"
+            android:textColor="#0D47A1"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvLicenseStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ACTIVE"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:background="#2E7D32"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
 
     <TextView
         android:id="@+id/tvCompanyId"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Company ID"
+        android:text="ID: LHR-001"
         android:textSize="14sp"
-        android:layout_marginTop="4dp" />
+        android:textColor="#424242"
+        android:textStyle="bold"
+        android:layout_marginTop="6dp" />
 
     <TextView
         android:id="@+id/tvCompanyCity"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="City"
+        android:text="City: Lahore"
         android:textSize="14sp"
+        android:textColor="#616161"
         android:layout_marginTop="4dp" />
 
     <TextView
-        android:id="@+id/tvLicenseStatus"
+        android:id="@+id/tvLicenseLimits"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="License Status"
-        android:textSize="14sp"
-        android:layout_marginTop="4dp" />
+        android:text="Mgr: 2 | Sup: 3 | Emp: 20 | Cust: 100 | Dlr: 10"
+        android:textSize="13sp"
+        android:textColor="#C62828"
+        android:textStyle="bold"
+        android:layout_marginTop="6dp" />
 
 </LinearLayout>

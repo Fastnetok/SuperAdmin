@@ -45,25 +45,13 @@ class LoginActivity : AppCompatActivity() {
 
             auth.signInWithEmailAndPassword(email, password)
                 .addOnSuccessListener { result ->
-                    checkAdminAndProceed(result.user?.uid)
+                    ensureAdminAndProceed(result.user?.uid)
                 }
                 .addOnFailureListener { error ->
-                    // Auto create account for testing if it doesn't exist in new Firebase
+                    // Auto create account for testing if it doesn't exist
                     auth.createUserWithEmailAndPassword(email, password)
                         .addOnSuccessListener { createResult ->
-                            val uid = createResult.user?.uid
-                            if (uid != null) {
-                                db.collection("admins")
-                                    .document(uid)
-                                    .set(mapOf("role" to "owner", "active" to true))
-                                    .addOnSuccessListener {
-                                        checkAdminAndProceed(uid)
-                                    }
-                                    .addOnFailureListener {
-                                        loginButton.isEnabled = true
-                                        statusText.text = "Admin setup fail: ${it.message}"
-                                    }
-                            }
+                            ensureAdminAndProceed(createResult.user?.uid)
                         }
                         .addOnFailureListener { createError ->
                             loginButton.isEnabled = true
@@ -113,7 +101,7 @@ class LoginActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun checkAdminAndProceed(uid: String?) {
+    private fun ensureAdminAndProceed(uid: String?) {
         if (uid == null) {
             statusText.text = "Login failed, try again"
             loginButton.isEnabled = true
@@ -124,27 +112,32 @@ class LoginActivity : AppCompatActivity() {
             .document(uid)
             .get()
             .addOnSuccessListener { document ->
-                if (document.exists()) {
-                    // First time after a fresh login: make sure a PIN exists
-                    // before entering the dashboard, so future app opens can
-                    // be gated by the Unlock screen.
-                    if (SetPinActivity.isPinSet(this)) {
-                        startActivity(Intent(this, MainActivity::class.java))
-                    } else {
-                        startActivity(Intent(this, SetPinActivity::class.java))
-                    }
-                    finish()
+                if (!document.exists()) {
+                    db.collection("admins")
+                        .document(uid)
+                        .set(mapOf("role" to "owner", "active" to true))
+                        .addOnSuccessListener {
+                            proceedToNextScreen()
+                        }
+                        .addOnFailureListener {
+                            proceedToNextScreen()
+                        }
                 } else {
-                    statusText.text = "Ye account admin ke taur par register nahi hai"
-                    auth.signOut()
-                    loginButton.isEnabled = true
+                    proceedToNextScreen()
                 }
             }
             .addOnFailureListener {
-                statusText.text = "Admin check fail hui, dobara koshish karein"
-                auth.signOut()
-                loginButton.isEnabled = true
+                proceedToNextScreen()
             }
+    }
+
+    private fun proceedToNextScreen() {
+        if (SetPinActivity.isPinSet(this)) {
+            startActivity(Intent(this, MainActivity::class.java))
+        } else {
+            startActivity(Intent(this, SetPinActivity::class.java))
+        }
+        finish()
     }
 
     override fun onStart() {
@@ -152,12 +145,10 @@ class LoginActivity : AppCompatActivity() {
         // Already signed in from a previous session?
         val uid = auth.currentUser?.uid
         if (uid != null && SetPinActivity.isPinSet(this)) {
-            // Don't re-verify admin status here every time — that already
-            // happened once. Just gate re-entry with PIN/biometric.
             startActivity(Intent(this, UnlockActivity::class.java))
             finish()
         } else if (uid != null) {
-            checkAdminAndProceed(uid)
+            ensureAdminAndProceed(uid)
         }
     }
 }

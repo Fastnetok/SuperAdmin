@@ -9,7 +9,7 @@
         android:id="@+id/etCompanyName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Company Name" />
+        android:hint="Company Name (e.g. ABC Internet)" />
 
     <EditText
         android:id="@+id/etCity"
@@ -24,5 +24,78 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:hint="Owner Name" />
+
+    <EditText
+        android:id="@+id/etAdminEmail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Company Admin Email"
+        android:inputType="textEmailAddress" />
+
+    <EditText
+        android:id="@+id/etAdminPassword"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Company Admin Password"
+        android:text="12345678" />
+
+    <EditText
+        android:id="@+id/etMaxManagers"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Max Managers Limit (e.g. 2)"
+        android:inputType="number" />
+
+    <EditText
+        android:id="@+id/etMaxSupervisors"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Max Supervisors Limit (e.g. 3)"
+        android:inputType="number" />
+
+    <EditText
+        android:id="@+id/etMaxEmployees"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Max Employees Limit (e.g. 20)"
+        android:inputType="number" />
+
+    <EditText
+        android:id="@+id/etMaxCustomers"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Max Customers Limit (e.g. 100)"
+        android:inputType="number" />
+
+    <EditText
+        android:id="@+id/etMaxDealers"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Max Dealers Limit (e.g. 10)"
+        android:inputType="number" />
+
+    <EditText
+        android:id="@+id/etLicenseStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="License Status (ACTIVE, DEMO, EXPIRED)"
+        android:text="ACTIVE" />
+
+    <EditText
+        android:id="@+id/etExpiryDays"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Expiry Days (e.g. 30 days)"
+        android:inputType="number"
+        android:text="30" />
 
 </LinearLayout>

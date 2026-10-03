@@ -16,19 +16,15 @@ android {
 
             val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
 
-            // FIXED: was file("app/keystore.jks") which resolved to
-            // app/app/keystore.jks (this file already lives inside app/
-            // module). Workflow creates the keystore at app/keystore.jks
-            // (relative to repo root), so paths must match exactly.
             storeFile = if (isGitHub) {
                 file("keystore.jks")
             } else {
-                file("D:/AndroidKeys/EboneReleaseKey.jks")
+                file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
             }
 
             storePassword = System.getenv("STORE_PASSWORD") ?: "aeiougabbas"
 
-            keyAlias = System.getenv("KEY_ALIAS") ?: "ebone"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "superadmin"
 
             keyPassword = System.getenv("KEY_PASSWORD") ?: "aeiougabbas"
         }
@@ -38,15 +34,15 @@ android {
         applicationId = "com.example.superadmin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 60
-        versionName = "1.0.60"
+        versionCode = 1
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRenderer"
     }
 
     buildTypes {
 
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            // debug build uses standard debug signing
         }
 
         release {

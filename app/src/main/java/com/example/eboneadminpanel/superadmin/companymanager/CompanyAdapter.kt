@@ -19,6 +19,7 @@ class CompanyAdapter(
         val tvCompanyId: TextView = view.findViewById(R.id.tvCompanyId)
         val tvCompanyCity: TextView = view.findViewById(R.id.tvCompanyCity)
         val tvLicenseStatus: TextView = view.findViewById(R.id.tvLicenseStatus)
+        val tvLicenseLimits: TextView = view.findViewById(R.id.tvLicenseLimits)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CompanyViewHolder {
@@ -32,7 +33,8 @@ class CompanyAdapter(
         holder.tvCompanyName.text = company.companyName
         holder.tvCompanyId.text = "ID: ${company.companyId}"
         holder.tvCompanyCity.text = "City: ${company.city}"
-        holder.tvLicenseStatus.text = "License: ${company.licenseStatus}"
+        holder.tvLicenseStatus.text = company.licenseStatus
+        holder.tvLicenseLimits.text = "Mgr: ${company.maxManagers} | Sup: ${company.maxSupervisors} | Emp: ${company.maxEmployees} | Cust: ${company.maxCustomers} | Dlr: ${company.maxDealers}"
 
         holder.itemView.setOnClickListener { onEditClick(company) }
         holder.itemView.setOnLongClickListener {

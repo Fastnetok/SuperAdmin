@@ -2,7 +2,9 @@ package com.example.superadmin
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.TextView
+import com.example.superadmin.superadmin.companymanager.CompanyManagerActivity
 import com.google.firebase.auth.FirebaseAuth
 
 class MenuActivity : BaseAdminActivity() {
@@ -10,6 +12,18 @@ class MenuActivity : BaseAdminActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu)
+
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email
+        val menuManageCompanies = findViewById<TextView>(R.id.menuManageCompanies)
+
+        if (currentUserEmail == "abbasok@gmail.com") {
+            menuManageCompanies.visibility = View.VISIBLE
+            menuManageCompanies.setOnClickListener {
+                startActivity(Intent(this, CompanyManagerActivity::class.java))
+            }
+        } else {
+            menuManageCompanies.visibility = View.GONE
+        }
 
         findViewById<TextView>(R.id.menuAddComplaint).setOnClickListener {
             startActivity(Intent(this, AddComplaintActivity::class.java))
