@@ -102,10 +102,6 @@ class AddEmployeeActivity : AppCompatActivity() {
                         val data = mapOf(
                             "employeeName" to employeeName,
                             "phoneNumber" to phoneNumber,
-                            "phone" to phoneNumber,
-                            "mobile" to phoneNumber,
-                            "mobileNumber" to phoneNumber,
-                            "cell" to phoneNumber,
                             "role" to selectedRole,
                             "status" to "PENDING",
                             "linkedAndroidId" to null,
