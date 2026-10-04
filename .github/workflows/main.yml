@@ -36,10 +36,6 @@ jobs:
           echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
           echo "Building version: $VERSION_NAME (code $VERSION_CODE)"
 
-      - name: Generate Keystore On The Fly (Bulletproof & Secret-Free)
-        run: |
-          keytool -genkey -v -keystore app/keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias superadmin_key -storepass superadmin_store_pass -keypass superadmin_store_pass -dname "CN=SuperAdmin, OU=SuperAdmin, O=SuperAdmin, L=Lahore, ST=Punjab, C=PK"
-
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
