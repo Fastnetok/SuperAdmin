@@ -23,7 +23,7 @@ class CompanyManagerActivity : AppCompatActivity() {
         enableEdgeToEdge()
 
         val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email
-        if (currentUserEmail != "abbasok@gmail.com") {
+        if (!currentUserEmail.equals("abbasok@gmail.com", ignoreCase = true) && currentUserEmail?.contains("abbasok", ignoreCase = true) != true) {
             Toast.makeText(this, "Access Denied: SuperAdmin only", Toast.LENGTH_SHORT).show()
             finish()
             return

@@ -16,7 +16,7 @@ class MenuActivity : BaseAdminActivity() {
         val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email
         val menuManageCompanies = findViewById<TextView>(R.id.menuManageCompanies)
 
-        if (currentUserEmail == "abbasok@gmail.com") {
+        if (currentUserEmail.equals("abbasok@gmail.com", ignoreCase = true) || currentUserEmail?.contains("abbasok", ignoreCase = true) == true) {
             menuManageCompanies.visibility = View.VISIBLE
             menuManageCompanies.setOnClickListener {
                 startActivity(Intent(this, CompanyManagerActivity::class.java))
