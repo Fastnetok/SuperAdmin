@@ -22,11 +22,11 @@ android {
                 file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
             }
 
-            storePassword = "superadmin_store_pass"
+            storePassword = System.getenv("STORE_PASSWORD") ?: "superadmin_store_pass"
 
-            keyAlias = "superadmin_key"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "superadmin_key"
 
-            keyPassword = "superadmin_store_pass"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "superadmin_store_pass"
         }
     }
 
