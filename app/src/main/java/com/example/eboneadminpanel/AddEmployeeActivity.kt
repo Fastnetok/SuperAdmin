@@ -64,6 +64,7 @@ class AddEmployeeActivity : AppCompatActivity() {
 
     private fun saveEmployee() {
         val employeeName = binding.etEmployeeName.text.toString().trim()
+        val phoneNumber = binding.etPhoneNumber.text.toString().trim()
         if (employeeName.isEmpty()) {
             showResult("Please enter the employee's name.", isError = true)
             return
@@ -82,6 +83,7 @@ class AddEmployeeActivity : AppCompatActivity() {
                 val selectedRole = binding.spinnerRole.selectedItem.toString().lowercase()
                 val data = mapOf(
                     "employeeName" to employeeName,
+                    "phoneNumber" to phoneNumber,
                     "role" to selectedRole,
                     "status" to "PENDING",
                     "linkedAndroidId" to null,
@@ -93,11 +95,12 @@ class AddEmployeeActivity : AppCompatActivity() {
                     .addOnSuccessListener {
                         showResult(
                             "✅ Employee \"$employeeName\" created!\n\n" +
-                                    "Send this to them via WhatsApp:\nName: $employeeName\nPIN: $currentPin",
+                                    "Send this to them via WhatsApp:\nName: $employeeName\nPhone: $phoneNumber\nPIN: $currentPin",
                             isError = false
                         )
                         Toast.makeText(this, "Employee saved successfully", Toast.LENGTH_SHORT).show()
                         binding.etEmployeeName.text.clear()
+                        binding.etPhoneNumber.text.clear()
                         generateNewPin()
                         binding.btnSaveEmployee.isEnabled = true
                         if (isManageListVisible) loadManageList() // refresh if already open

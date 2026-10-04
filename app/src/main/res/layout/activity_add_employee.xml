@@ -66,6 +66,23 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
+                android:text="Phone Number"
+                android:textStyle="bold"
+                android:textSize="14sp" />
+            <EditText
+                android:id="@+id/etPhoneNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="e.g. 03225652222"
+                android:inputType="phone"
+                android:background="@drawable/bg_input_box"
+                android:padding="12dp"
+                android:layout_marginTop="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
                 android:text="Staff Role (Employee / Manager / Supervisor)"
                 android:textStyle="bold"
                 android:textSize="14sp" />
