@@ -72,46 +72,68 @@ class AddEmployeeActivity : AppCompatActivity() {
 
         binding.btnSaveEmployee.isEnabled = false
 
-        db.getReference("employeePins").child(currentPin).get()
-            .addOnSuccessListener { existing ->
-                if (existing.exists()) {
-                    showResult("This PIN is already in use — tap Regenerate and try again.", isError = true)
+        db.getReference("employeePins").get()
+            .addOnSuccessListener { snapshot ->
+                var nameExists = false
+                for (child in snapshot.children) {
+                    val name = child.child("employeeName").getValue(String::class.java)
+                    if (name != null && name.equals(employeeName, ignoreCase = true)) {
+                        nameExists = true
+                        break
+                    }
+                }
+
+                if (nameExists) {
+                    showResult("❌ User already exists! An employee with the name \"$employeeName\" is already registered.", isError = true)
                     binding.btnSaveEmployee.isEnabled = true
                     return@addOnSuccessListener
                 }
 
-                val selectedRole = binding.spinnerRole.selectedItem.toString().lowercase()
-                val data = mapOf(
-                    "employeeName" to employeeName,
-                    "phoneNumber" to phoneNumber,
-                    "role" to selectedRole,
-                    "status" to "PENDING",
-                    "linkedAndroidId" to null,
-                    "linkedUid" to null,
-                    "createdAt" to System.currentTimeMillis()
-                )
+                db.getReference("employeePins").child(currentPin).get()
+                    .addOnSuccessListener { existing ->
+                        if (existing.exists()) {
+                            showResult("This PIN is already in use — tap Regenerate and try again.", isError = true)
+                            binding.btnSaveEmployee.isEnabled = true
+                            return@addOnSuccessListener
+                        }
 
-                db.getReference("employeePins").child(currentPin).setValue(data)
-                    .addOnSuccessListener {
-                        showResult(
-                            "✅ Employee \"$employeeName\" created!\n\n" +
-                                    "Send this to them via WhatsApp:\nName: $employeeName\nPhone: $phoneNumber\nPIN: $currentPin",
-                            isError = false
+                        val selectedRole = binding.spinnerRole.selectedItem.toString().lowercase()
+                        val data = mapOf(
+                            "employeeName" to employeeName,
+                            "phoneNumber" to phoneNumber,
+                            "role" to selectedRole,
+                            "status" to "PENDING",
+                            "linkedAndroidId" to null,
+                            "linkedUid" to null,
+                            "createdAt" to System.currentTimeMillis()
                         )
-                        Toast.makeText(this, "Employee saved successfully", Toast.LENGTH_SHORT).show()
-                        binding.etEmployeeName.text.clear()
-                        binding.etPhoneNumber.text.clear()
-                        generateNewPin()
-                        binding.btnSaveEmployee.isEnabled = true
-                        if (isManageListVisible) loadManageList() // refresh if already open
+
+                        db.getReference("employeePins").child(currentPin).setValue(data)
+                            .addOnSuccessListener {
+                                showResult(
+                                    "✅ Employee \"$employeeName\" created!\n\n" +
+                                            "Send this to them via WhatsApp:\nName: $employeeName\nPhone: $phoneNumber\nPIN: $currentPin",
+                                    isError = false
+                                )
+                                Toast.makeText(this, "Employee saved successfully", Toast.LENGTH_SHORT).show()
+                                binding.etEmployeeName.text.clear()
+                                binding.etPhoneNumber.text.clear()
+                                generateNewPin()
+                                binding.btnSaveEmployee.isEnabled = true
+                                if (isManageListVisible) loadManageList() // refresh if already open
+                            }
+                            .addOnFailureListener { e ->
+                                showResult("Failed to save: ${e.message}", isError = true)
+                                binding.btnSaveEmployee.isEnabled = true
+                            }
                     }
                     .addOnFailureListener { e ->
-                        showResult("Failed to save: ${e.message}", isError = true)
+                        showResult("Could not check PIN: ${e.message}", isError = true)
                         binding.btnSaveEmployee.isEnabled = true
                     }
             }
             .addOnFailureListener { e ->
-                showResult("Could not check PIN: ${e.message}", isError = true)
+                showResult("Could not check employee list: ${e.message}", isError = true)
                 binding.btnSaveEmployee.isEnabled = true
             }
     }
