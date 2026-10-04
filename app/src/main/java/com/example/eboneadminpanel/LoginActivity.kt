@@ -48,15 +48,8 @@ class LoginActivity : AppCompatActivity() {
                     ensureAdminAndProceed(result.user?.uid)
                 }
                 .addOnFailureListener { error ->
-                    // Auto create account for testing if it doesn't exist
-                    auth.createUserWithEmailAndPassword(email, password)
-                        .addOnSuccessListener { createResult ->
-                            ensureAdminAndProceed(createResult.user?.uid)
-                        }
-                        .addOnFailureListener { createError ->
-                            loginButton.isEnabled = true
-                            statusText.text = "Login fail: ${error.message}"
-                        }
+                    loginButton.isEnabled = true
+                    statusText.text = "Login fail: ${error.message}"
                 }
         }
 
