@@ -32,7 +32,7 @@ import kotlin.concurrent.thread
 object VersionChecker {
 
     private const val GITHUB_API =
-        "https://api.github.com/repos/Fastnetok/EboneAdminPanel/releases/latest"
+        "https://api.github.com/repos/Fastnetok/SuperAdmin/releases/latest"
 
     private val client = OkHttpClient()
 
