@@ -42,7 +42,7 @@ android {
     buildTypes {
 
         debug {
-            // debug build uses standard debug signing
+            signingConfig = signingConfigs.getByName("release")
         }
 
         release {
