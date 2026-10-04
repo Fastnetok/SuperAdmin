@@ -2,6 +2,7 @@ package com.example.superadmin
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.TextView
 import com.example.superadmin.superadmin.companymanager.CompanyManagerActivity
@@ -13,10 +14,11 @@ class MenuActivity : BaseAdminActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu)
 
-        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
+        Log.d("SuperAdminCheck", "Current User Email: '$currentUserEmail'")
         val menuManageCompanies = findViewById<TextView>(R.id.menuManageCompanies)
 
-        if (currentUserEmail.equals("abbasok@gmail.com", ignoreCase = true) || currentUserEmail?.contains("abbasok", ignoreCase = true) == true) {
+        if (currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true) {
             menuManageCompanies.visibility = View.VISIBLE
             menuManageCompanies.setOnClickListener {
                 startActivity(Intent(this, CompanyManagerActivity::class.java))
