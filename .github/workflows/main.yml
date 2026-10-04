@@ -20,6 +20,12 @@ jobs:
       - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
+          distribution: tempurin
+          java-version: 21
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
           distribution: temurin
           java-version: 21
 
@@ -46,6 +52,13 @@ jobs:
         with:
           name: SuperAdmin-Release
           path: app/build/outputs/apk/release/*.apk
+
+      - name: Create and Push Git Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag v${{ env.VERSION_NAME }}
+          git push origin v${{ env.VERSION_NAME }} || true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
