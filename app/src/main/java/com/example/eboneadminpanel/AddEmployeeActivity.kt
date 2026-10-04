@@ -14,6 +14,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.google.firebase.firestore.FirebaseFirestore
 
 /**
  * Everything about managing employees lives on THIS ONE screen:
@@ -107,6 +108,11 @@ class AddEmployeeActivity : AppCompatActivity() {
                             "linkedUid" to null,
                             "createdAt" to System.currentTimeMillis()
                         )
+
+                        db.getReference("employeePins").child(currentPin).setValue(data)
+                        val firestore = FirebaseFirestore.getInstance()
+                        firestore.collection("employeePins").document(currentPin).set(data)
+                        firestore.collection("employees").document(currentPin).set(data)
 
                         db.getReference("employeePins").child(currentPin).setValue(data)
                             .addOnSuccessListener {
