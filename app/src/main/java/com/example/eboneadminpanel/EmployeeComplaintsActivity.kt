@@ -67,44 +67,12 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             .addValueEventListener(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     complaintList.clear()
-                    val now = System.currentTimeMillis()
                     for (item in snapshot.children) {
                         val complaint = item.getValue(Complaint::class.java) ?: continue
                         val assignedNorm = complaint.assignedTo.trim().lowercase(Locale.getDefault())
                         if (assignedNorm == targetNorm &&
                             !complaint.status.equals("Resolved", ignoreCase = true)
                         ) {
-                            if (!complaint.seenByEmployee) {
-                                complaint.seenByEmployee = true
-                                complaint.seenTime = now
-
-                                val updates = mapOf<String, Any>(
-                                    "seenByEmployee" to true,
-                                    "seen" to true,
-                                    "read" to true,
-                                    "isRead" to true,
-                                    "seenTime" to now,
-                                    "readAt" to now,
-                                    "seenAt" to now
-                                )
-
-                                item.ref.updateChildren(updates)
-                                val key = item.key
-                                if (key != null) {
-                                    val db = FirebaseDatabase.getInstance()
-                                    db.getReference("employeeComplaints")
-                                        .child(complaint.assignedTo).child(key).updateChildren(updates)
-                                    if (targetNorm != complaint.assignedTo.lowercase(Locale.getDefault())) {
-                                        db.getReference("employeeComplaints")
-                                            .child(targetNorm).child(key).updateChildren(updates)
-                                    }
-                                    if (complaint.company.isNotBlank()) {
-                                        db.getReference("companies")
-                                            .child(complaint.company.uppercase(Locale.getDefault()))
-                                            .child("complaints").child(key).updateChildren(updates)
-                                    }
-                                }
-                            }
                             complaintList.add(complaint)
                         }
                     }

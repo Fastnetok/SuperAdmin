@@ -39,13 +39,12 @@ class ProgressActivity : AppCompatActivity() {
                      (read == true || read?.toString().equals("true", ignoreCase = true) || read?.toString() == "1") ||
                      (isRead == true || isRead?.toString().equals("true", ignoreCase = true) || isRead?.toString() == "1") ||
                      (readByEmp == true || readByEmp?.toString().equals("true", ignoreCase = true) || readByEmp?.toString() == "1") ||
-                     status == "READ" || status == "SEEN" || status == "VIEWED" || status == "OPENED" || status == "IN PROGRESS"
+                     status == "READ" || status == "SEEN" || status == "VIEWED" || status == "OPENED"
 
         val rawTime = (snap.child("seenTime").value?.toString()?.toLongOrNull() ?: 0L)
             .let { if (it > 0) it else snap.child("readAt").value?.toString()?.toLongOrNull() ?: 0L }
             .let { if (it > 0) it else snap.child("seenAt").value?.toString()?.toLongOrNull() ?: 0L }
             .let { if (it > 0) it else snap.child("viewedAt").value?.toString()?.toLongOrNull() ?: 0L }
-            .let { if (it > 0) it else snap.child("updatedAt").value?.toString()?.toLongOrNull() ?: 0L }
 
         return Pair(isSeen, rawTime)
     }
@@ -67,9 +66,12 @@ class ProgressActivity : AppCompatActivity() {
                     val complaint = item.getValue(Complaint::class.java) ?: continue
                     if (complaint.assignedTo.isNotEmpty() && !complaint.status.equals("Resolved", ignoreCase = true)) {
                         val (isSeen, seenTime) = checkSnapshotIsSeen(item)
-                        if (isSeen) {
+                        if (isSeen && seenTime > 0) {
                             complaint.seenByEmployee = true
-                            complaint.seenTime = if (seenTime > 0) seenTime else System.currentTimeMillis()
+                            complaint.seenTime = seenTime
+                        } else if (isSeen) {
+                            complaint.seenByEmployee = true
+                            complaint.seenTime = System.currentTimeMillis()
                         } else {
                             complaint.seenByEmployee = false
                             complaint.seenTime = 0L
@@ -88,34 +90,35 @@ class ProgressActivity : AppCompatActivity() {
                 }
             }
 
-            // Cross-check with employeeComplaints node in case Employee App updated seen status under employeeComplaints!
+            // Cross-check with employeeComplaints node strictly by complaintId
             val eSnap = empSnap
             if (eSnap != null) {
                 for (empNode in eSnap.children) {
-                    val empKeyName = empNode.key ?: continue
                     for (compNode in empNode.children) {
                         val compId = compNode.key ?: continue
                         val (isSeen, seenTime) = checkSnapshotIsSeen(compNode)
 
                         val compFromSnap = compNode.getValue(Complaint::class.java)
 
-                        // 1. Try to find existing matching complaint in latestComplaintMap
+                        // Match STRICTLY by complaintId
                         var matching = latestComplaintMap.values.find { it.complaintId == compId }
-                            ?: latestComplaintMap.values.find {
-                                it.assignedTo.trim().lowercase(Locale.getDefault()) == empKeyName.trim().lowercase(Locale.getDefault())
-                            }
 
-                        // 2. If not found in complaints node, construct complaint from employeeComplaints
-                        if (matching == null && compFromSnap != null && compFromSnap.assignedTo.isNotBlank()) {
+                        // If not found in complaints node, construct complaint from employeeComplaints
+                        if (matching == null && compFromSnap != null && compFromSnap.assignedTo.isNotBlank() && compFromSnap.complaintId == compId) {
                             if (!compFromSnap.status.equals("Resolved", ignoreCase = true)) {
                                 matching = compFromSnap
                                 if (matching.complaintId.isBlank()) matching.complaintId = compId
-                                latestComplaintMap[matching.assignedTo] = matching
+                                val existingInMap = latestComplaintMap[matching.assignedTo]
+                                val currentScore = if (matching.assignedTime > 0) matching.assignedTime else matching.createdTime
+                                val existingScore = if (existingInMap != null) (if (existingInMap.assignedTime > 0) existingInMap.assignedTime else existingInMap.createdTime) else 0L
+                                if (existingInMap == null || currentScore > existingScore) {
+                                    latestComplaintMap[matching.assignedTo] = matching
+                                }
                             }
                         }
 
-                        // 3. Update seen status on matching complaint
-                        if (isSeen && matching != null) {
+                        // Update seen status on matching complaint if found
+                        if (isSeen && matching != null && matching.complaintId == compId) {
                             matching.seenByEmployee = true
                             matching.seenTime = if (seenTime > 0) seenTime else (if (matching.seenTime > 0) matching.seenTime else System.currentTimeMillis())
                         }

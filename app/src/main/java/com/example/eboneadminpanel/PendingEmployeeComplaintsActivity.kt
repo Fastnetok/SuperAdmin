@@ -105,24 +105,6 @@ class PendingEmployeeComplaintsActivity :
                                 &&
                                 !complaint.status.equals("Resolved", ignoreCase = true)
                             ) {
-                                if (!complaint.seenByEmployee) {
-                                    val now = System.currentTimeMillis()
-                                    complaint.seenByEmployee = true
-                                    complaint.seenTime = now
-
-                                    val updates = mapOf<String, Any>(
-                                        "seenByEmployee" to true,
-                                        "seen" to true,
-                                        "read" to true,
-                                        "isRead" to true,
-                                        "seenTime" to now,
-                                        "readAt" to now,
-                                        "seenAt" to now
-                                    )
-
-                                    item.ref.updateChildren(updates)
-                                }
-
                                 employeeComplaints.add(
                                     complaint
                                 )
