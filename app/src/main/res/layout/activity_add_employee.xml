@@ -186,12 +186,32 @@
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/layoutManageList"
+                android:id="@+id/layoutManageContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="gone"
-                android:paddingTop="8dp" />
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/etSearchEmployee"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:hint="🔍 Search by Employee Name or PIN..."
+                    android:inputType="text"
+                    android:background="@drawable/bg_input_box"
+                    android:padding="12dp"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:id="@+id/layoutManageList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingTop="4dp" />
+
+            </LinearLayout>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

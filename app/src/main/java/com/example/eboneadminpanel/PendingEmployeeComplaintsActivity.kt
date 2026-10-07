@@ -6,6 +6,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.database.*
+import java.util.Locale
 
 class PendingEmployeeComplaintsActivity :
     AppCompatActivity() {
@@ -70,7 +71,6 @@ class PendingEmployeeComplaintsActivity :
     private fun loadPendingComplaints(
         employeeName: String
     ) {
-
         FirebaseDatabase
             .getInstance()
             .getReference(
@@ -98,13 +98,30 @@ class PendingEmployeeComplaintsActivity :
                                     Complaint::class.java
                                 ) ?: continue
 
+                            val normTarget = employeeName.trim().lowercase(Locale.getDefault())
+                            val normAssigned = complaint.assignedTo.trim().lowercase(Locale.getDefault())
                             if (
-                                complaint.assignedTo ==
-                                employeeName
+                                normAssigned == normTarget
                                 &&
-                                complaint.status !=
-                                "Resolved"
+                                !complaint.status.equals("Resolved", ignoreCase = true)
                             ) {
+                                if (!complaint.seenByEmployee) {
+                                    val now = System.currentTimeMillis()
+                                    complaint.seenByEmployee = true
+                                    complaint.seenTime = now
+
+                                    val updates = mapOf<String, Any>(
+                                        "seenByEmployee" to true,
+                                        "seen" to true,
+                                        "read" to true,
+                                        "isRead" to true,
+                                        "seenTime" to now,
+                                        "readAt" to now,
+                                        "seenAt" to now
+                                    )
+
+                                    item.ref.updateChildren(updates)
+                                }
 
                                 employeeComplaints.add(
                                     complaint

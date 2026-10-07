@@ -81,7 +81,7 @@ class UnlockActivity : AppCompatActivity() {
         val biometricPrompt = BiometricPrompt(this, executor, callback)
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Ebone Admin Unlock")
+            .setTitle("SuperAdmin Unlock")
             .setSubtitle("Fingerprint se unlock karein")
             .setNegativeButtonText("PIN use karein")
             .build()

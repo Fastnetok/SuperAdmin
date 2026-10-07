@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Ebone Admin — Locked"
+        android:text="SuperAdmin — Locked"
         android:textSize="20sp"
         android:textStyle="bold"
         android:layout_marginBottom="24dp" />

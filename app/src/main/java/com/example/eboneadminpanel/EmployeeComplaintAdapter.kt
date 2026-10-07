@@ -306,8 +306,9 @@ class EmployeeComplaintAdapter(
                                     mapOf(
                                         "assignedTo" to selectedName,
                                         "status" to "Progress",
-                                        "assignedTime" to
-                                                System.currentTimeMillis()
+                                        "assignedTime" to System.currentTimeMillis(),
+                                        "seenByEmployee" to false,
+                                        "seenTime" to 0L
                                     )
                                 )
                                 .addOnSuccessListener {

@@ -5,14 +5,17 @@ import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
+import java.util.Locale
 
 class AllEmployeesActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
 
-    private val employeeList =
-        mutableListOf<EmployeeItem>()
+    private val employeeList = mutableListOf<EmployeeItem>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -21,71 +24,125 @@ class AllEmployeesActivity : AppCompatActivity() {
             R.layout.activity_all_employees
         )
 
-        recyclerView =
-            findViewById(
-                R.id.recyclerView
-            )
-
-        recyclerView.layoutManager =
-            LinearLayoutManager(this)
+        recyclerView = findViewById(R.id.recyclerView)
+        recyclerView.layoutManager = LinearLayoutManager(this)
 
         loadEmployees()
     }
 
+    private fun normalizeName(name: String): String {
+        return name.trim().lowercase(Locale.getDefault())
+    }
+
     private fun loadEmployees() {
+        val db = FirebaseDatabase.getInstance()
 
-        FirebaseDatabase
-            .getInstance()
-            .getReference("employees")
-            .get()
-            .addOnSuccessListener { snapshot ->
+        db.getReference("employees").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(empSnapshot: DataSnapshot) {
+                db.getReference("employeePins").addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(pinsSnapshot: DataSnapshot) {
+                        db.getReference("ApprovedDevices").addListenerForSingleValueEvent(object : ValueEventListener {
+                            override fun onDataChange(approvedSnapshot: DataSnapshot) {
 
-                employeeList.clear()
+                                class RawEmpData(
+                                    var primaryKey: String = "",
+                                    var name: String = "",
+                                    var status: String = "OFFLINE"
+                                )
 
-                for (employee in snapshot.children) {
+                                val nameToDataMap = mutableMapOf<String, RawEmpData>()
 
-                    val employeeId =
-                        employee.key ?: ""
+                                fun processSnapshotChild(child: DataSnapshot, sourceDefaultStatus: String) {
+                                    val key = child.key ?: return
+                                    val rawName = child.child("employeeName").value?.toString()
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: child.child("name").value?.toString()
+                                        ?: return
 
-                    val name =
-                        employee.child(
-                            "employeeName"
-                        ).value?.toString()
-                            ?: "Unknown"
+                                    val normName = normalizeName(rawName)
+                                    val statusVal = child.child("status").value?.toString()
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: sourceDefaultStatus
 
-                    val status =
-                        employee.child(
-                            "status"
-                        ).value?.toString()
-                            ?: "OFFLINE"
+                                    val existing = nameToDataMap.getOrPut(normName) {
+                                        RawEmpData(primaryKey = key, name = rawName, status = statusVal)
+                                    }
 
-                    employeeList.add(
-                        EmployeeItem(
-                            employeeId,
-                            name,
-                            status
-                        )
-                    )
-                }
+                                    // Prioritize Approved / active / online status over PENDING / OFFLINE
+                                    if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
+                                        existing.status = statusVal
+                                        existing.primaryKey = key
+                                    } else if (existing.status.equals("OFFLINE", true) && statusVal.equals("PENDING", true)) {
+                                        existing.status = statusVal
+                                    }
 
-                recyclerView.adapter =
-                    EmployeeAdapter(
-                        employeeList
-                    ) { employee ->
+                                    if (existing.name.isBlank() || existing.name == normName) {
+                                        existing.name = rawName
+                                    }
 
-                        val intent =
-                            Intent(
-                                this,
-                                EmployeeDetailsActivity::class.java
-                            )
+                                    // Ensure backfill to Realtime Database employees if missing
+                                    if (!empSnapshot.hasChild(key)) {
+                                        val backfillData = mapOf(
+                                            "employeeName" to rawName,
+                                            "phoneNumber" to (child.child("phoneNumber").value?.toString() ?: child.child("mobileNumber").value?.toString() ?: ""),
+                                            "mobileNumber" to (child.child("mobileNumber").value?.toString() ?: child.child("phoneNumber").value?.toString() ?: ""),
+                                            "status" to statusVal,
+                                            "role" to (child.child("role").value?.toString() ?: "employee"),
+                                            "createdAt" to System.currentTimeMillis()
+                                        )
+                                        db.getReference("employees").child(key).updateChildren(backfillData)
+                                    }
+                                }
 
-                        intent.putExtra(
-                            "employeeId",
-                            employee.employeeId
-                        )
+                                // 1. ApprovedDevices snapshot
+                                for (child in approvedSnapshot.children) {
+                                    processSnapshotChild(child, "Approved")
+                                }
 
-                        startActivity(intent)
+                                // 2. Realtime Database employees snapshot
+                                for (child in empSnapshot.children) {
+                                    processSnapshotChild(child, "OFFLINE")
+                                }
+
+                                // 3. Realtime Database employeePins snapshot
+                                for (child in pinsSnapshot.children) {
+                                    processSnapshotChild(child, "PENDING")
+                                }
+
+                                employeeList.clear()
+                                for ((_, data) in nameToDataMap) {
+                                    employeeList.add(
+                                        EmployeeItem(
+                                            employeeId = data.primaryKey,
+                                            name = data.name,
+                                            status = data.status
+                                        )
+                                    )
+                                }
+
+                                // Sort alphabetically by employee name
+                                employeeList.sortBy { it.name.lowercase(Locale.getDefault()) }
+
+                                if (recyclerView.adapter == null) {
+                                    recyclerView.adapter = EmployeeAdapter(employeeList) { employee ->
+                                        val intent = Intent(this@AllEmployeesActivity, EmployeeDetailsActivity::class.java)
+                                        intent.putExtra("employeeId", employee.employeeId)
+                                        startActivity(intent)
+                                    }
+                                } else {
+                                    recyclerView.adapter?.notifyDataSetChanged()
+                                }
+                            }
+
+                            override fun onCancelled(error: DatabaseError) {}
+                        })
                     }
+
+                    override fun onCancelled(error: DatabaseError) {}
+                })
             }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
     }
 }

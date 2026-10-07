@@ -216,6 +216,9 @@ class MainActivity : AppCompatActivity(),
         loadDashboardCounters()
         setupNewConnectionBadge()
 
+        // Clean up any duplicate employee records in Firebase
+        FirebaseEmployeeDeduplicator.cleanDuplicateEmployees()
+
         // NEW: Startup session refresh for all 4 panels
         StartupSessionManager.startRefresh(this)
     }
@@ -302,6 +305,7 @@ class MainActivity : AppCompatActivity(),
                                             LatLng? = null
 
                                     val seenEmployeeNames = HashSet<String>()
+                                    val seenEmployeeNorms = HashSet<String>()
 
                                     for (employee in snapshot.children) {
 
@@ -320,19 +324,29 @@ class MainActivity : AppCompatActivity(),
                                         val employeeName =
                                             employee.child("employeeName")
                                                 .value?.toString()
-                                                ?: "Employee"
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?: employee.child("name")
+                                                    .value?.toString()
+                                                    ?: "Employee"
+
+                                        val normName = employeeName.trim().lowercase(Locale.getDefault())
+
+                                        // Ensure each employee is counted only once on dashboard
+                                        if (employeeName != "Employee") {
+                                            if (seenEmployeeNorms.contains(normName)) {
+                                                continue
+                                            }
+                                            seenEmployeeNorms.add(normName)
+                                        }
 
                                         val hasAttendance = attSnapshot.child(deviceId).hasChild(todayKey) ||
                                                            (employeeName != "Employee" && attSnapshot.child(employeeName).hasChild(todayKey))
 
                                         if (hasAttendance) {
-
                                             onlineList.add(
                                                 employeeName
                                             )
-
                                         } else {
-
                                             offlineList.add(
                                                 employeeName
                                             )

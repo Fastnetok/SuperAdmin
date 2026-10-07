@@ -87,16 +87,38 @@ class AddComplaintActivity : AppCompatActivity() {
             val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
             val fb = FirebaseDatabase.getInstance()
 
-            // Step 1: Load all employees
+            // Step 1: Load all employees & deduplicate strictly by normalized employee name
             fb.getReference("employees").get().addOnSuccessListener { empSnapshot ->
-                val allEmployees = mutableListOf<Pair<String, String>>() // Name to DeviceId
+                class UniqueEmp(
+                    var displayName: String,
+                    var primaryDeviceId: String,
+                    val allDeviceIds: MutableSet<String> = mutableSetOf()
+                )
+
+                val uniqueEmpMap = mutableMapOf<String, UniqueEmp>()
+
                 for (child in empSnapshot.children) {
-                    val name = child.child("employeeName").getValue(String::class.java) ?: ""
-                    val deviceId = child.key ?: ""
-                    if (name.isNotEmpty() && deviceId.isNotEmpty()) {
-                        allEmployees.add(name to deviceId)
+                    val rawName = child.child("employeeName").getValue(String::class.java)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: child.child("name").getValue(String::class.java)
+                        ?: continue
+                    val deviceId = child.key ?: continue
+                    val normName = rawName.trim().lowercase(Locale.getDefault())
+
+                    val statusVal = child.child("status").getValue(String::class.java) ?: ""
+                    val existing = uniqueEmpMap.getOrPut(normName) {
+                        UniqueEmp(displayName = rawName, primaryDeviceId = deviceId)
+                    }
+
+                    existing.allDeviceIds.add(deviceId)
+
+                    if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
+                        existing.primaryDeviceId = deviceId
+                        existing.displayName = rawName
                     }
                 }
+
+                val allEmployees = uniqueEmpMap.values.toList()
 
                 // Step 2: Load attendance to see who is present today
                 fb.getReference("attendance").get().addOnSuccessListener { attSnapshot ->
@@ -109,46 +131,55 @@ class AddComplaintActivity : AppCompatActivity() {
 
                     // Step 3: Load complaints to count current workload
                     fb.getReference("complaints").get().addOnSuccessListener { compSnapshot ->
-                        val complaintCounts = mutableMapOf<String, Int>() // Name to Count
+                        val complaintCounts = mutableMapOf<String, Int>() // Normalized Name -> Count
                         for (comp in compSnapshot.children) {
                             val assignedTo = comp.child("assignedTo").getValue(String::class.java) ?: ""
                             val status = comp.child("status").getValue(String::class.java) ?: ""
                             if (assignedTo.isNotEmpty() && status != "Resolved") {
-                                complaintCounts[assignedTo] = (complaintCounts[assignedTo] ?: 0) + 1
+                                val normAssigned = assignedTo.trim().lowercase(Locale.getDefault())
+                                complaintCounts[normAssigned] = (complaintCounts[normAssigned] ?: 0) + 1
                             }
                         }
 
-                        val totalCount = allEmployees.size
-
-                        // Step 4: Prepare display list with Online (Present) on top, Offline (Absent) below, sorted by active workload descending
+                        // Step 4: Prepare display list with Online (Present) on top, Offline (Absent) below
                         val filteredList = mutableListOf<String>()
                         val finalEmployeeNames = mutableListOf<String>()
 
-                        val presentEmployees = mutableListOf<Pair<String, String>>()
-                        val absentEmployees = mutableListOf<Pair<String, String>>()
+                        val presentEmployees = mutableListOf<UniqueEmp>()
+                        val absentEmployees = mutableListOf<UniqueEmp>()
 
-                        for ((name, deviceId) in allEmployees) {
-                            if (presentDeviceIds.contains(deviceId)) {
-                                presentEmployees.add(name to deviceId)
+                        for (emp in allEmployees) {
+                            val isPresent = emp.allDeviceIds.any { presentDeviceIds.contains(it) }
+                            if (isPresent) {
+                                presentEmployees.add(emp)
                             } else {
-                                absentEmployees.add(name to deviceId)
+                                absentEmployees.add(emp)
                             }
                         }
 
-                        presentEmployees.sortByDescending { complaintCounts[it.first] ?: 0 }
-                        absentEmployees.sortByDescending { complaintCounts[it.first] ?: 0 }
+                        presentEmployees.sortByDescending { complaintCounts[it.displayName.trim().lowercase(Locale.getDefault())] ?: 0 }
+                        absentEmployees.sortByDescending { complaintCounts[it.displayName.trim().lowercase(Locale.getDefault())] ?: 0 }
 
-                        for ((name, _) in presentEmployees) {
-                            val count = complaintCounts[name] ?: 0
-                            finalEmployeeNames.add(name)
-                            filteredList.add("🟢 $name (Online | Active: $count)")
+                        val addedNorms = HashSet<String>()
+                        for (emp in presentEmployees) {
+                            val norm = emp.displayName.trim().lowercase(Locale.getDefault())
+                            if (addedNorms.add(norm)) {
+                                val count = complaintCounts[norm] ?: 0
+                                finalEmployeeNames.add(emp.displayName)
+                                filteredList.add("🟢 ${emp.displayName} (Online | Active: $count)")
+                            }
                         }
 
-                        for ((name, _) in absentEmployees) {
-                            val count = complaintCounts[name] ?: 0
-                            finalEmployeeNames.add(name)
-                            filteredList.add("🔴 $name (Offline | Active: $count)")
+                        for (emp in absentEmployees) {
+                            val norm = emp.displayName.trim().lowercase(Locale.getDefault())
+                            if (addedNorms.add(norm)) {
+                                val count = complaintCounts[norm] ?: 0
+                                finalEmployeeNames.add(emp.displayName)
+                                filteredList.add("🔴 ${emp.displayName} (Offline | Active: $count)")
+                            }
                         }
+
+                        val totalCount = finalEmployeeNames.size
 
                         if (finalEmployeeNames.isEmpty()) {
                             Toast.makeText(this, "Koi employee registered nahi hai", Toast.LENGTH_LONG).show()
@@ -187,12 +218,23 @@ class AddComplaintActivity : AppCompatActivity() {
                                     )
 
                                     fb.getReference("complaints").child(complaintId).setValue(complaint).addOnSuccessListener {
-                                        fb.getReference("employeeNotifications").child(selectedEmployee).push().setValue(hashMapOf(
+                                        if (selectedCompany.isNotBlank()) {
+                                            fb.getReference("companies").child(selectedCompany.uppercase(Locale.getDefault())).child("complaints").child(complaintId).setValue(complaint)
+                                        }
+                                        val normEmp = selectedEmployee.trim().lowercase(Locale.getDefault())
+                                        fb.getReference("employeeComplaints").child(selectedEmployee).child(complaintId).setValue(complaint)
+                                        fb.getReference("employeeComplaints").child(normEmp).child(complaintId).setValue(complaint)
+
+                                        val notifData = hashMapOf(
                                             "title" to "New Complaint Assigned",
                                             "message" to "User ID: $userId",
                                             "complaintId" to complaintId,
                                             "timestamp" to System.currentTimeMillis()
-                                        ))
+                                        )
+                                        fb.getReference("employeeNotifications").child(selectedEmployee).push().setValue(notifData)
+                                        if (normEmp != selectedEmployee) {
+                                            fb.getReference("employeeNotifications").child(normEmp).push().setValue(notifData)
+                                        }
                                         Toast.makeText(this, "Complaint assigned to $selectedEmployee", Toast.LENGTH_SHORT).show()
                                         finish()
                                     }.addOnFailureListener {

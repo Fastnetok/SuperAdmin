@@ -6,6 +6,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.database.*
+import java.util.Locale
 
 class ResolvedEmployeeComplaintsActivity :
     AppCompatActivity() {
@@ -98,12 +99,12 @@ class ResolvedEmployeeComplaintsActivity :
                                     Complaint::class.java
                                 ) ?: continue
 
+                            val normTarget = employeeName.trim().lowercase(Locale.getDefault())
+                            val normAssigned = complaint.assignedTo.trim().lowercase(Locale.getDefault())
                             if (
-                                complaint.assignedTo ==
-                                employeeName
+                                normAssigned == normTarget
                                 &&
-                                complaint.status ==
-                                "Resolved"
+                                complaint.status.equals("Resolved", ignoreCase = true)
                                 &&
                                 complaint.resolvedTime >=
                                 todayStart

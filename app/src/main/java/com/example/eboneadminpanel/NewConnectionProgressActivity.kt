@@ -58,7 +58,35 @@ class NewConnectionProgressActivity : AppCompatActivity() {
                     for (child in employeeNode.children) {
                         val connection = child.getValue(NewConnection::class.java) ?: continue
 
-                        if (frontOfQueue == null || connection.displayOrder < frontOfQueue!!.displayOrder) {
+                        val isSeen = connection.seenByEmployee
+                                || child.child("seenByEmployee").getValue(Boolean::class.java) == true
+                                || child.child("seen").getValue(Boolean::class.java) == true
+                                || child.child("read").getValue(Boolean::class.java) == true
+                                || child.child("isRead").getValue(Boolean::class.java) == true
+                                || (child.child("status").value?.toString() ?: "").equals("READ", true)
+                                || (child.child("status").value?.toString() ?: "").equals("SEEN", true)
+
+                        val rawTime = (child.child("seenTime").value?.toString()?.toLongOrNull() ?: 0L)
+                            .let { if (it > 0) it else child.child("readAt").value?.toString()?.toLongOrNull() ?: 0L }
+                            .let { if (it > 0) it else child.child("seenAt").value?.toString()?.toLongOrNull() ?: 0L }
+                            .let { if (it > 0) it else connection.seenTime }
+
+                        if (isSeen && rawTime > 0) {
+                            connection.seenByEmployee = true
+                            connection.seenTime = rawTime
+                        } else if (isSeen) {
+                            connection.seenByEmployee = true
+                            connection.seenTime = 0L
+                        } else {
+                            connection.seenByEmployee = false
+                            connection.seenTime = 0L
+                        }
+
+                        val currentScore = if (connection.assignedTime > 0) connection.assignedTime else connection.createdTime
+                        val front = frontOfQueue
+                        val frontScore = if (front != null) (if (front.assignedTime > 0) front.assignedTime else front.createdTime) else 0L
+
+                        if (frontOfQueue == null || currentScore > frontScore) {
                             frontOfQueue = connection
                         }
                     }

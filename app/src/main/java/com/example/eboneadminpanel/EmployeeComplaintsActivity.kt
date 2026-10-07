@@ -62,15 +62,49 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
     }
 
     private fun loadComplaints(employeeName: String) {
+        val targetNorm = employeeName.trim().lowercase(Locale.getDefault())
         FirebaseDatabase.getInstance().getReference("complaints")
             .addValueEventListener(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     complaintList.clear()
+                    val now = System.currentTimeMillis()
                     for (item in snapshot.children) {
                         val complaint = item.getValue(Complaint::class.java) ?: continue
-                        if (complaint.assignedTo == employeeName &&
+                        val assignedNorm = complaint.assignedTo.trim().lowercase(Locale.getDefault())
+                        if (assignedNorm == targetNorm &&
                             !complaint.status.equals("Resolved", ignoreCase = true)
                         ) {
+                            if (!complaint.seenByEmployee) {
+                                complaint.seenByEmployee = true
+                                complaint.seenTime = now
+
+                                val updates = mapOf<String, Any>(
+                                    "seenByEmployee" to true,
+                                    "seen" to true,
+                                    "read" to true,
+                                    "isRead" to true,
+                                    "seenTime" to now,
+                                    "readAt" to now,
+                                    "seenAt" to now
+                                )
+
+                                item.ref.updateChildren(updates)
+                                val key = item.key
+                                if (key != null) {
+                                    val db = FirebaseDatabase.getInstance()
+                                    db.getReference("employeeComplaints")
+                                        .child(complaint.assignedTo).child(key).updateChildren(updates)
+                                    if (targetNorm != complaint.assignedTo.lowercase(Locale.getDefault())) {
+                                        db.getReference("employeeComplaints")
+                                            .child(targetNorm).child(key).updateChildren(updates)
+                                    }
+                                    if (complaint.company.isNotBlank()) {
+                                        db.getReference("companies")
+                                            .child(complaint.company.uppercase(Locale.getDefault()))
+                                            .child("complaints").child(key).updateChildren(updates)
+                                    }
+                                }
+                            }
                             complaintList.add(complaint)
                         }
                     }
@@ -149,7 +183,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         val checkedIds = adapter.onlineStatusMap.keys
 
         // 1. EBONE
-        val newEbone = complaintList.filter { 
+        val newEbone = complaintList.filter {
             val company = it.company.trim().uppercase(Locale.US)
             (company == "EBONE" || company == "EBILL" || company == "EBONE (EBILL.PK)") && !checkedIds.contains(it.complaintId)
         }
@@ -164,7 +198,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         }
 
         // 2. WATEEN
-        val newWateen = complaintList.filter { 
+        val newWateen = complaintList.filter {
             val company = it.company.trim().uppercase(Locale.US)
             (company == "WATEEN" || company == "WATEEN.COM") && !checkedIds.contains(it.complaintId)
         }
@@ -179,7 +213,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         }
 
         // 3. ZONG
-        val newZong = complaintList.filter { 
+        val newZong = complaintList.filter {
             val company = it.company.trim().uppercase(Locale.US)
             (company == "ZONG" || company == "TURBONET.ZONG.COM.PK") && !checkedIds.contains(it.complaintId)
         }

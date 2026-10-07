@@ -165,10 +165,16 @@ class AutoComplaintMonitorActivity : AppCompatActivity() {
         val isWithinWindow = nowTotal in allowStartTotal..allowEndTotal
 
         val onlineList = mutableListOf<Pair<EmployeeItem, Int>>()
+        val seenNorms = HashSet<String>()
 
         for (emp in eSnap.children) {
             val deviceId = emp.key ?: ""
             val name = emp.child("employeeName").value?.toString() ?: "Unknown"
+            val normName = name.trim().lowercase(Locale.getDefault())
+
+            if (name != "Unknown" && !seenNorms.add(normName)) {
+                continue
+            }
 
             val hasAttendance = aSnap?.child(deviceId)?.hasChild(todayKey) == true || 
                                (name != "Unknown" && aSnap?.child(name)?.hasChild(todayKey) == true)
@@ -179,8 +185,9 @@ class AutoComplaintMonitorActivity : AppCompatActivity() {
                     for (comp in cSnap.children) {
                         val assignedTo = comp.child("assignedTo").value?.toString() ?: ""
                         val status = comp.child("status").value?.toString() ?: ""
-                        // Use exact name match as in AddComplaint/Adapter for consistency
-                        if (assignedTo == name && status != "Resolved") {
+                        val normAssigned = assignedTo.trim().lowercase(Locale.getDefault())
+                        val normName = name.trim().lowercase(Locale.getDefault())
+                        if (normAssigned == normName && !status.equals("Resolved", ignoreCase = true)) {
                             totalComplaints++
                         }
                     }

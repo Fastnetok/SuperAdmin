@@ -684,7 +684,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             .setNeutralButton("Share") { _, _ ->
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "Ebone Admin Panel - ISP Settings Export")
+                    putExtra(Intent.EXTRA_SUBJECT, "SuperAdmin Admin Panel - ISP Settings Export")
                     putExtra(Intent.EXTRA_TEXT, exportCode)
                 }
                 startActivity(Intent.createChooser(shareIntent, "Share Settings Export"))

@@ -1123,13 +1123,43 @@ class BiometricAttendanceActivity : AppCompatActivity() {
     private fun loadEmployees() {
         db.getReference("employees").get().addOnSuccessListener { snap ->
             employeeMap.clear()
+            salaryMap.clear()
+
+            class EmpAgg(
+                var displayName: String,
+                var primaryDeviceId: String,
+                var salary: Double = 0.0
+            )
+
+            val aggMap = mutableMapOf<String, EmpAgg>()
+
             for (emp in snap.children) {
-                val name = emp.child("employeeName").value?.toString() ?: continue
+                val rawName = emp.child("employeeName").value?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: emp.child("name").value?.toString()
+                    ?: continue
                 val deviceId = emp.key ?: continue
                 val sal = (emp.child("salary").value as? Number)?.toDouble() ?: 0.0
-                employeeMap[name] = deviceId
-                salaryMap[deviceId] = sal
+                val normName = rawName.trim().lowercase(Locale.getDefault())
+
+                val statusVal = emp.child("status").value?.toString() ?: ""
+                val existing = aggMap.getOrPut(normName) {
+                    EmpAgg(displayName = rawName, primaryDeviceId = deviceId, salary = sal)
+                }
+
+                if (sal > 0) existing.salary = sal
+
+                if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
+                    existing.primaryDeviceId = deviceId
+                    existing.displayName = rawName
+                }
             }
+
+            for ((_, agg) in aggMap) {
+                employeeMap[agg.displayName] = agg.primaryDeviceId
+                salaryMap[agg.primaryDeviceId] = agg.salary
+            }
+
             val names = employeeMap.keys.sorted().toMutableList()
             names.add("── All Employees ──")
             if (names.size == 1) return@addOnSuccessListener

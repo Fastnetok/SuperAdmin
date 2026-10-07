@@ -14,6 +14,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import java.util.Locale
 
 class OfficeGeofenceActivity : AppCompatActivity() {
 
@@ -188,9 +189,35 @@ class OfficeGeofenceActivity : AppCompatActivity() {
                 return@addOnSuccessListener
             }
 
+            class GeofenceEmp(
+                var displayName: String,
+                var primaryDeviceId: String
+            )
+
+            val uniqueEmpMap = mutableMapOf<String, GeofenceEmp>()
+
             for (emp in empSnap.children) {
+                val rawName = emp.child("employeeName").value?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: emp.child("name").value?.toString()
+                    ?: continue
                 val deviceId = emp.key ?: continue
-                val name = emp.child("employeeName").value?.toString() ?: "Unknown"
+                val normName = rawName.trim().lowercase(Locale.getDefault())
+
+                val statusVal = emp.child("status").value?.toString() ?: ""
+                val existing = uniqueEmpMap.getOrPut(normName) {
+                    GeofenceEmp(displayName = rawName, primaryDeviceId = deviceId)
+                }
+
+                if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
+                    existing.primaryDeviceId = deviceId
+                    existing.displayName = rawName
+                }
+            }
+
+            for ((_, empData) in uniqueEmpMap) {
+                val deviceId = empData.primaryDeviceId
+                val name = empData.displayName
 
                 db.getReference("attendance").child(deviceId).child(todayKey).get()
                     .addOnSuccessListener { attSnap ->

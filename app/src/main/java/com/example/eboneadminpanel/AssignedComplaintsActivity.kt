@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.database.*
+import java.util.Locale
 
 class AssignedComplaintsActivity : AppCompatActivity() {
 
@@ -255,9 +256,26 @@ class AssignedComplaintsActivity : AppCompatActivity() {
 
                 )
 
-                FirebaseDatabase
-                    .getInstance()
-                    .getReference("complaints")
+                val db = FirebaseDatabase.getInstance()
+                db.getReference("complaints")
+                    .child(complaint.complaintId)
+                    .updateChildren(updates)
+
+                if (complaint.company.isNotBlank()) {
+                    db.getReference("companies")
+                        .child(complaint.company.uppercase(Locale.getDefault()))
+                        .child("complaints")
+                        .child(complaint.complaintId)
+                        .updateChildren(updates)
+                }
+
+                val normEmp = selectedEmployeeName.trim().lowercase(Locale.getDefault())
+                db.getReference("employeeComplaints")
+                    .child(selectedEmployeeName)
+                    .child(complaint.complaintId)
+                    .updateChildren(updates)
+                db.getReference("employeeComplaints")
+                    .child(normEmp)
                     .child(complaint.complaintId)
                     .updateChildren(updates)
 
@@ -284,36 +302,17 @@ class AssignedComplaintsActivity : AppCompatActivity() {
 
                     )
 
-                FirebaseDatabase
-                    .getInstance()
-                    .getReference(
-                        "employeeNotifications"
-                    )
-                    .child(
-                        selectedEmployeeName
-                    )
-                    .push()
-                    .setValue(
-                        notificationData
-                    )
+                val notifRef = FirebaseDatabase.getInstance().getReference("employeeNotifications")
+                notifRef.child(selectedEmployeeName).push().setValue(notificationData)
                     .addOnSuccessListener {
-
-                        Toast.makeText(
-                            this,
-                            "Notification Saved OK",
-                            Toast.LENGTH_LONG
-                        ).show()
-
+                        Toast.makeText(this, "Notification Saved OK", Toast.LENGTH_LONG).show()
                     }
                     .addOnFailureListener {
-
-                        Toast.makeText(
-                            this,
-                            "Error: " + it.message,
-                            Toast.LENGTH_LONG
-                        ).show()
-
+                        Toast.makeText(this, "Error: " + it.message, Toast.LENGTH_LONG).show()
                     }
+                if (normEmp != selectedEmployeeName) {
+                    notifRef.child(normEmp).push().setValue(notificationData)
+                }
 
             }
 

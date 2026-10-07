@@ -299,7 +299,7 @@ class PaymentActivationService : Service() {
             CHANNEL_ID
         )
             .setContentTitle(
-                "Ebone Admin Panel"
+                "SuperAdmin Admin Panel"
             )
             .setContentText(
                 "Listening for new customer payments…"

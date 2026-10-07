@@ -20,7 +20,7 @@ import java.io.FileOutputStream
 import kotlin.concurrent.thread
 
 /**
- * Checks GitHub Releases for a newer Ebone Admin Panel version, and —
+ * Checks GitHub Releases for a newer SuperAdmin Panel version, and —
  * upgraded from the previous "open in browser" link — downloads the APK
  * INSIDE the app with a progress bar, then goes straight to the system
  * install prompt. No file sitting in Downloads, no extra manual steps.

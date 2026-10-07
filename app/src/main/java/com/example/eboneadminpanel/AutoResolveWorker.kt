@@ -60,9 +60,14 @@ class AutoResolveWorker(context: Context, params: WorkerParameters) : CoroutineW
         val attendance = fb.getReference("attendance").get().await()
         val employees = fb.getReference("employees").get().await()
 
-        val employeeNameMap = employees.children.associate { 
-            it.child("employeeName").value?.toString() to it.key 
-        }
+        val employeeNameMap = employees.children.mapNotNull { child ->
+            val name = child.child("employeeName").value?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?: child.child("name").value?.toString()
+            if (!name.isNullOrBlank()) {
+                name.trim().lowercase(Locale.getDefault()) to child.key
+            } else null
+        }.toMap()
 
         val eboneQueue = mutableListOf<Pair<Complaint, String>>()
         val zongQueue = mutableListOf<Pair<Complaint, String>>()
@@ -71,8 +76,9 @@ class AutoResolveWorker(context: Context, params: WorkerParameters) : CoroutineW
         for (compSnap in complaints.children) {
             val complaint = compSnap.getValue(Complaint::class.java) ?: continue
             
-            if (complaint.status == "Progress" && complaint.assignedTo.isNotEmpty()) {
-                val employeeId = employeeNameMap[complaint.assignedTo] ?: continue
+            if (complaint.status.equals("Progress", ignoreCase = true) && complaint.assignedTo.isNotEmpty()) {
+                val normAssigned = complaint.assignedTo.trim().lowercase(Locale.getDefault())
+                val employeeId = employeeNameMap[normAssigned] ?: continue
                 if (!monitoredEmployees.contains(employeeId)) continue
 
                 val isOnline = attendance.child(employeeId).hasChild(todayKey)

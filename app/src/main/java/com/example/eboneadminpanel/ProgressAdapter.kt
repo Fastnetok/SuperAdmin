@@ -129,24 +129,19 @@ class ProgressAdapter(
         // ---- Seen Status (Blue Double Tick) ----
         if (complaint.seenByEmployee) {
 
+            // ایمپلائی نے ایپ کھول کر دیکھ لی ہے -> اب بلیو ڈبل ٹک اور ٹائم شو کریں
             holder.seenStatusIcon.setImageResource(
                 R.drawable.ic_double_tick
             )
 
-            val seenFormatter = SimpleDateFormat(
-                "h:mm a",
-                Locale.getDefault()
-            )
-
             holder.seenTimeText.text =
-                seenFormatter.format(
-                    Date(complaint.seenTime)
-                )
+                TimeAgoFormatter.formatSeenTime(complaint.seenTime)
 
             holder.seenTimeText.visibility = View.VISIBLE
 
         } else {
 
+            // ایمپلائی نے ابھی تک ایپ نہیں کھولی -> گرے سنگل ٹک شو کریں
             holder.seenStatusIcon.setImageResource(
                 R.drawable.ic_single_tick
             )

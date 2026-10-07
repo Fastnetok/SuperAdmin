@@ -13,6 +13,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import java.util.Locale
 
 class AutoMonitorAdapter(
     private var employeeList: List<EmployeeItem>
@@ -112,8 +113,11 @@ class AutoMonitorAdapter(
                         val status = child.child("status").getValue(String::class.java) ?: ""
                         val company = child.child("company").getValue(String::class.java) ?: ""
 
-                        if (assignedTo == employeeName && status != "Resolved") {
-                            when (company) {
+                        val normAssigned = assignedTo.trim().lowercase(Locale.getDefault())
+                        val normEmp = employeeName.trim().lowercase(Locale.getDefault())
+
+                        if (normAssigned == normEmp && !status.equals("Resolved", ignoreCase = true)) {
+                            when (company.trim().uppercase(Locale.getDefault())) {
                                 "EBONE" -> ebone++
                                 "ZONG" -> zong++
                                 "WATEEN" -> wateen++
