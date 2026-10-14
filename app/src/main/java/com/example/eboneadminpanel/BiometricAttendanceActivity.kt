@@ -1,5 +1,6 @@
 package com.example.superadmin
 
+import com.example.superadmin.core.CompanyDataHelper
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -1134,6 +1135,7 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             val aggMap = mutableMapOf<String, EmpAgg>()
 
             for (emp in snap.children) {
+                if (!CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
                 val rawName = emp.child("employeeName").value?.toString()
                     ?.takeIf { it.isNotBlank() }
                     ?: emp.child("name").value?.toString()

@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
+import com.example.superadmin.core.CompanyDataHelper
 import com.example.superadmin.databinding.ActivityAddCustomerBinding
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -25,7 +26,7 @@ class AddCustomerActivity : AppCompatActivity() {
 
     private var currentPin = ""
 
-    private val companies = listOf("EBONE", "WATEEN", "ZONG")
+    private val companies = mutableListOf("EBONE", "WATEEN", "ZONG")
     private val masterUsersCollection = "ispMasterUsers"
     private val customersCollection = "customers"
 
@@ -45,11 +46,19 @@ class AddCustomerActivity : AppCompatActivity() {
         binding = ActivityAddCustomerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.spinnerCompany.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            companies
-        )
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
+            companies.clear()
+            companies.addAll(enabledCompanies)
+            if (companies.isNotEmpty()) {
+                latestSearchCompany = companies.first()
+            }
+            binding.spinnerCompany.adapter = ArrayAdapter(
+                this,
+                android.R.layout.simple_spinner_dropdown_item,
+                companies
+            )
+        }
 
         generateNewPin()
 

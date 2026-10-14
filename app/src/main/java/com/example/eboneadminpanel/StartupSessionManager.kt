@@ -21,11 +21,11 @@ object StartupSessionManager {
 
     fun startRefresh(context: Context) {
         Log.d(TAG, "Starting staggered session refresh...")
-        
+
         showProgressNotification(context, "Updating Panel Sessions...", "Ebill ریفریش ہو رہا ہے...")
 
         val handler = Handler(Looper.getMainLooper())
-        
+
         // 1. EBILL (Immediate)
         BackgroundBalanceUpdater.checkBalance(context, "EBONE", "Okara") {
             Log.d(TAG, "Ebill poke done")
@@ -58,23 +58,27 @@ object StartupSessionManager {
     }
 
     private fun showProgressNotification(context: Context, title: String, msg: String) {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-                manager.createNotificationChannel(
-                    NotificationChannel(CHANNEL_ID, "Startup Sync", NotificationManager.IMPORTANCE_LOW)
-                )
+        try {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+                    manager.createNotificationChannel(
+                        NotificationChannel(CHANNEL_ID, "Startup Sync", NotificationManager.IMPORTANCE_LOW)
+                    )
+                }
             }
-        }
 
-        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.stat_notify_sync)
-            .setContentTitle(title)
-            .setContentText(msg)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-        manager.notify(NOTIF_ID, notif)
+            val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(msg)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            manager.notify(NOTIF_ID, notif)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing startup sync notification: ${e.message}")
+        }
     }
 
     private fun updateNotification(context: Context, title: String, msg: String) {
@@ -82,7 +86,11 @@ object StartupSessionManager {
     }
 
     private fun cancelNotification(context: Context) {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.cancel(NOTIF_ID)
+        try {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(NOTIF_ID)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error canceling startup sync notification: ${e.message}")
+        }
     }
 }

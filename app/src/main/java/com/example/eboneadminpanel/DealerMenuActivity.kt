@@ -5,6 +5,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.FirebaseDatabase
 
 class DealerMenuActivity : BaseAdminActivity() {
@@ -13,8 +14,10 @@ class DealerMenuActivity : BaseAdminActivity() {
     private lateinit var maximumInput: EditText
     private lateinit var statusText: TextView
 
-    private val settingsRef =
-        FirebaseDatabase.getInstance().getReference("paymentSettings")
+    private val settingsRef by lazy {
+        val companyId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        FirebaseDatabase.getInstance().getReference("paymentSettings").child(companyId)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

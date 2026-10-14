@@ -13,7 +13,7 @@ class ZongRenalaBalanceSyncActivity : AppCompatActivity() {
                 ?: Double.NaN
 
             if (result.resultCode == RESULT_OK && !balance.isNaN()) {
-                ZongRenalaBalanceManager.updateBalance(balance) {
+                ZongRenalaBalanceManager.updateBalance(this, balance) {
                     finish()
                 }
             } else {

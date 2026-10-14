@@ -14,166 +14,67 @@ class ComplaintAdapter(
     private val complaintList: MutableList<Complaint>
 ) : RecyclerView.Adapter<ComplaintAdapter.ViewHolder>() {
 
-    val selectedComplaints =
-        mutableListOf<Complaint>()
+    val selectedComplaints = mutableListOf<Complaint>()
 
-    class ViewHolder(itemView: View) :
-        RecyclerView.ViewHolder(itemView) {
-
-        val checkComplaint: CheckBox =
-            itemView.findViewById(
-                R.id.checkComplaint
-            )
-
-        val userIdText: TextView =
-            itemView.findViewById(
-                R.id.userIdText
-            )
-
-        val addressText: TextView =
-            itemView.findViewById(
-                R.id.addressText
-            )
-
-        val phoneText: TextView =
-            itemView.findViewById(
-                R.id.phoneText
-            )
-
-        val assignedToText: TextView =
-            itemView.findViewById(
-                R.id.assignedToText
-            )
-
-        val statusText: TextView =
-            itemView.findViewById(
-                R.id.statusText
-            )
-
-        val dateText: TextView =
-            itemView.findViewById(
-                R.id.dateText
-            )
-
-        val tvLogCompany: TextView =
-            itemView.findViewById(
-                R.id.tvLogCompany
-            )
+    class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val checkComplaint: CheckBox = itemView.findViewById(R.id.checkComplaint)
+        val userIdText: TextView = itemView.findViewById(R.id.userIdText)
+        val addressText: TextView = itemView.findViewById(R.id.addressText)
+        val phoneText: TextView = itemView.findViewById(R.id.phoneText)
+        val assignedToText: TextView = itemView.findViewById(R.id.assignedToText)
+        val statusText: TextView = itemView.findViewById(R.id.statusText)
+        val dateText: TextView = itemView.findViewById(R.id.dateText)
+        val tvLogCompany: TextView = itemView.findViewById(R.id.tvLogCompany)
     }
 
-    override fun onCreateViewHolder(
-        parent: ViewGroup,
-        viewType: Int
-    ): ViewHolder {
-
-        val view =
-            LayoutInflater.from(parent.context)
-                .inflate(
-                    R.layout.item_complaint,
-                    parent,
-                    false
-                )
-
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_complaint, parent, false)
         return ViewHolder(view)
     }
 
-    override fun onBindViewHolder(
-        holder: ViewHolder,
-        position: Int
-    ) {
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val complaint = complaintList[position]
 
-        val complaint =
-            complaintList[position]
+        holder.userIdText.text = complaint.userId
+        holder.addressText.text = complaint.address
+        holder.phoneText.text = complaint.phoneNumber
 
-        holder.userIdText.text =
-            complaint.userId
+        holder.assignedToText.text = "Assigned To : " +
+                if (complaint.assignedTo.isEmpty()) "Not Assigned" else complaint.assignedTo
 
-        holder.addressText.text =
-            complaint.address
+        holder.statusText.text = "Status : " + complaint.status
 
-        holder.phoneText.text =
-            complaint.phoneNumber
+        val dateFormat = SimpleDateFormat("dd MMM yyyy / hh:mm a", Locale.getDefault())
+        holder.dateText.text = dateFormat.format(Date(complaint.createdTime))
 
-        holder.assignedToText.text =
-            "Assigned To : " +
-                    if (
-                        complaint.assignedTo.isEmpty()
-                    ) {
-                        "Not Assigned"
-                    } else {
-                        complaint.assignedTo
-                    }
+        val company = complaint.company.trim().uppercase(Locale.getDefault())
+        val isIsp = company in setOf("EBONE", "EBILL", "EBONE (EBILL.PK)", "WATEEN", "WATEEN.COM", "ZONG", "TURBONET.ZONG.COM.PK")
 
-        holder.statusText.text =
-            "Status : " +
-                    complaint.status
-
-        val dateFormat =
-            SimpleDateFormat(
-                "dd MMM yyyy / hh:mm a",
-                Locale.getDefault()
-            )
-
-        holder.dateText.text =
-            dateFormat.format(
-                Date(
-                    complaint.createdTime
-                )
-            )
-
-        // Company Badge
-        val company =
-            complaint.company.trim().uppercase(Locale.getDefault())
-
-        if (company.isEmpty()) {
-
-            holder.tvLogCompany.visibility =
-                View.GONE
-
+        if (company.isEmpty() || !isIsp) {
+            holder.tvLogCompany.visibility = View.GONE
         } else {
-
-            holder.tvLogCompany.visibility =
-                View.VISIBLE
-
-            holder.tvLogCompany.text =
-                company
+            holder.tvLogCompany.visibility = View.VISIBLE
+            holder.tvLogCompany.text = when (company) {
+                "EBONE", "EBILL", "EBONE (EBILL.PK)" -> "EBONE"
+                "WATEEN", "WATEEN.COM" -> "WATEEN"
+                "ZONG", "TURBONET.ZONG.COM.PK" -> "ZONG"
+                else -> company
+            }
         }
 
         holder.checkComplaint.setOnCheckedChangeListener(null)
+        holder.checkComplaint.isChecked = selectedComplaints.contains(complaint)
 
-        holder.checkComplaint.isChecked =
-            selectedComplaints.contains(
-                complaint
-            )
-
-        holder.checkComplaint
-            .setOnCheckedChangeListener { _, isChecked ->
-
-                if (isChecked) {
-
-                    if (
-                        !selectedComplaints.contains(
-                            complaint
-                        )
-                    ) {
-
-                        selectedComplaints.add(
-                            complaint
-                        )
-                    }
-
-                } else {
-
-                    selectedComplaints.remove(
-                        complaint
-                    )
+        holder.checkComplaint.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (!selectedComplaints.contains(complaint)) {
+                    selectedComplaints.add(complaint)
                 }
+            } else {
+                selectedComplaints.remove(complaint)
             }
+        }
     }
 
-    override fun getItemCount(): Int {
-
-        return complaintList.size
-
-    }
+    override fun getItemCount(): Int = complaintList.size
 }

@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.*
 
 class PendingSummaryActivity :
@@ -70,6 +71,7 @@ class PendingSummaryActivity :
                         for (
                         item in snapshot.children
                         ) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@PendingSummaryActivity, item)) continue
 
                             val complaint =
                                 item.getValue(

@@ -9,6 +9,8 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.CityPermissionManager
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -24,13 +26,21 @@ class NetworkPackagesActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
     private var customersListener: ListenerRegistration? = null
-    private val companies = listOf("EBONE", "WATEEN", "ZONG")
+    private var companies = listOf("EBONE", "WATEEN", "ZONG", "JAZZ")
+    private var cachedDocs: List<DocumentSnapshot> = emptyList()
 
     private lateinit var contentContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildLayout())
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
+            companies = enabledCompanies
+            if (cachedDocs.isNotEmpty()) {
+                render(cachedDocs)
+            }
+        }
         startListening()
     }
 
@@ -88,7 +98,8 @@ class NetworkPackagesActivity : AppCompatActivity() {
         customersListener = db.collection("customers")
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot == null) return@addSnapshotListener
-                render(snapshot.documents)
+                cachedDocs = snapshot.documents
+                render(cachedDocs)
             }
     }
 

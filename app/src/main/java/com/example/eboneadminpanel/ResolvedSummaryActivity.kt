@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.*
 
 class ResolvedSummaryActivity :
@@ -74,6 +75,7 @@ class ResolvedSummaryActivity :
                         for (
                         item in snapshot.children
                         ) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@ResolvedSummaryActivity, item)) continue
 
                             val complaint =
                                 item.getValue(

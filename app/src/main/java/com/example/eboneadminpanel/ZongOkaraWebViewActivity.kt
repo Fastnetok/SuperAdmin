@@ -372,6 +372,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
         val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", "Okara")
         
+        Log.e("ZONG_DEBUG", "🔍 ZongOkaraWebViewActivity -> ZONE=Okara, loaded username='$username' (Expected: abbas046)")
         Log.d("ZongOkaraWebView", "Zong Okara → Login Started → Okara URL ($loginUrl) → User: $username")
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
@@ -508,7 +509,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             Log.d("ZongOkaraWebView", "Zong Okara → Balance Read attempt $attempt: $balance (raw: $raw)")
 
             if (balance != null) {
-                FranchiseBalanceManager.updateBalance("ZONG", balance, "Okara") {
+                FranchiseBalanceManager.updateBalance(this, "ZONG", balance, "Okara") {
                     FranchiseBalanceManager.showUpdateNotification(this, "ZONG", balance, "Okara")
                     setResult(RESULT_OK, Intent().apply {
                         putExtra("checked_balance", balance)
@@ -531,7 +532,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         webView.evaluateJavascript("(function(){ return document.body.innerText.substring(0,500); })()") { clean ->
             val logEntry = mapOf("dealerName" to (dealerDisplayName ?: ""), "panel" to "ZONG", "amount" to (topupAmount?.toDoubleOrNull() ?: 0.0), "submittedAt" to System.currentTimeMillis(), "zone" to "Okara")
             db.collection("dealerPayments").add(logEntry)
-            
+
             val transactionId = sourceTransactionId?.trim()?.takeIf { it.isNotBlank() }
             if (transactionId != null) {
                 db.collection("dealerTransactions").document(transactionId).update(mapOf("status" to "COMPLETED", "transferStatus" to "TRANSFERRED", "transferredAt" to System.currentTimeMillis()))

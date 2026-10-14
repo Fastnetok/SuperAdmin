@@ -53,14 +53,14 @@ object CustomerCacheManager {
     }
 
     fun getAll(context: Context): List<CachedCustomer> {
-        return listOf("EBONE", "WATEEN", "ZONG").flatMap { getList(context, it) }
+        return listOf("EBONE", "WATEEN", "ZONG", "JAZZ").flatMap { getList(context, it) }
     }
 
     fun getLastSyncTime(context: Context, isp: String): Long =
         prefs(context).getLong(KEY_PREFIX_SYNCED + isp, 0L)
 
     fun getLastSyncTimeAny(context: Context): Long =
-        listOf("EBONE", "WATEEN", "ZONG").maxOfOrNull { getLastSyncTime(context, it) } ?: 0L
+        listOf("EBONE", "WATEEN", "ZONG", "JAZZ").maxOfOrNull { getLastSyncTime(context, it) } ?: 0L
 
     /** Live local search — no network call, filters the cached diary. */
     fun search(context: Context, query: String, ispFilter: String = "ALL"): List<CachedCustomer> {

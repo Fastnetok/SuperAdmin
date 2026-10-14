@@ -206,6 +206,7 @@ class AllSalaryTotalActivity : AppCompatActivity() {
                 var done = 0
 
                 for (emp in empSnap.children) {
+                    if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
                     val name = emp.child("employeeName").value?.toString() ?: continue
                     val did = emp.key ?: continue
                     val base = (emp.child("salary").value as? Number)?.toDouble() ?: 0.0

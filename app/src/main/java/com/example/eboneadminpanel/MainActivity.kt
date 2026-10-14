@@ -7,6 +7,7 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.text.Html
 import android.text.InputType
 import android.widget.EditText
 import android.widget.TextView
@@ -15,6 +16,16 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import android.location.Location
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.FirestorePaths
+import com.example.superadmin.core.SessionManager
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.Circle
@@ -23,6 +34,7 @@ import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.firebase.database.*
 import java.text.SimpleDateFormat
@@ -47,6 +59,19 @@ class MainActivity : AppCompatActivity(),
             android.widget.Toast.makeText(this, "SMS aur Notification permission zaroori hai payment auto-activation ke liye", android.widget.Toast.LENGTH_LONG).show()
         }
     }
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
+                if (::mMap.isInitialized) {
+                    try {
+                        mMap.isMyLocationEnabled = true
+                    } catch (_: SecurityException) {}
+                }
+            }
+        }
 
     private lateinit var mMap: GoogleMap
     private var hasCenteredCameraOnce = false
@@ -215,6 +240,7 @@ class MainActivity : AppCompatActivity(),
 
         loadDashboardCounters()
         setupNewConnectionBadge()
+        setupCompanyFilter()
 
         // Clean up any duplicate employee records in Firebase
         FirebaseEmployeeDeduplicator.cleanDuplicateEmployees()
@@ -252,24 +278,272 @@ class MainActivity : AppCompatActivity(),
             })
     }
 
-    override fun onMapReady(
-        googleMap: GoogleMap
-    ) {
+    private fun setupCompanyFilter() {
+        val companyFilterBar = findViewById<View>(R.id.companyFilterBar) ?: return
+        val companyFilterSpinner = findViewById<Spinner>(R.id.companyFilterSpinner) ?: return
 
+        val sessionManager = SessionManager(this)
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
+        val isSuperAdmin = sessionManager.isSuperAdmin() || currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true
+
+        if (!isSuperAdmin) {
+            companyFilterBar.visibility = View.GONE
+            return
+        }
+
+        companyFilterBar.visibility = View.VISIBLE
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection(FirestorePaths.COMPANIES)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                val displayList = mutableListOf<CharSequence>()
+                val companyIdList = mutableListOf<String>()
+
+                val allLabel: CharSequence = Html.fromHtml("<font color='#FFD700'>🌐</font> <font color='#FFFFFF'><b>ALL (All Companies)</b></font>", Html.FROM_HTML_MODE_LEGACY)
+                displayList.add(allLabel)
+                companyIdList.add("ALL")
+
+                for (doc in snapshot.documents) {
+                    val cId = doc.getString("companyId")?.trim() ?: doc.id.trim()
+                    val cName = doc.getString("companyName")?.trim() ?: cId
+                    val city = doc.getString("city")?.trim() ?: ""
+
+                    val textVal = if (city.isNotBlank()) "$cName ($city - $cId)" else "$cName ($cId)"
+                    val formatted: CharSequence = Html.fromHtml("<font color='#FFD700'>🏢</font> <font color='#FFFFFF'><b>$textVal</b></font>", Html.FROM_HTML_MODE_LEGACY)
+                    displayList.add(formatted)
+                    companyIdList.add(cId)
+                }
+
+                val adapter = ArrayAdapter(this, R.layout.layout_company_spinner_item, displayList)
+                adapter.setDropDownViewResource(R.layout.layout_company_spinner_dropdown_item)
+                companyFilterSpinner.adapter = adapter
+
+                // Restore previous selection if exists
+                val currentActiveCompany = sessionManager.getActiveCompanyId() ?: "ALL"
+                val activeIndex = companyIdList.indexOfFirst { it.equals(currentActiveCompany, ignoreCase = true) }
+                if (activeIndex >= 0) {
+                    companyFilterSpinner.setSelection(activeIndex)
+                }
+
+                var isFirstTrigger = true
+                companyFilterSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        val selectedId = companyIdList.getOrNull(position) ?: "ALL"
+                        sessionManager.saveActiveCompany(selectedId)
+
+                        if (!isFirstTrigger) {
+                            setupFirebaseListeners()
+                            loadDashboardCounters()
+                        }
+                        isFirstTrigger = false
+                    }
+
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
+            }
+    }
+
+    private var attendanceSnapshot: DataSnapshot? = null
+    private var employeesSnapshot: DataSnapshot? = null
+    private var attendanceListener: ValueEventListener? = null
+    private var employeesListener: ValueEventListener? = null
+    private var attendanceRef: com.google.firebase.database.DatabaseReference? = null
+    private var employeesRef: com.google.firebase.database.DatabaseReference? = null
+
+    private fun setupFirebaseListeners() {
+        if (attendanceListener != null && attendanceRef != null) {
+            attendanceRef?.removeEventListener(attendanceListener!!)
+        }
+        if (employeesListener != null && employeesRef != null) {
+            employeesRef?.removeEventListener(employeesListener!!)
+        }
+
+        attendanceRef = CompanyDataHelper.getScopedDatabaseReference(this, "attendance")
+        attendanceListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                attendanceSnapshot = snapshot
+                updateDashboardMap()
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        attendanceRef?.addValueEventListener(attendanceListener!!)
+
+        employeesRef = CompanyDataHelper.getScopedDatabaseReference(this, "employees")
+        employeesListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                employeesSnapshot = snapshot
+                updateDashboardMap()
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        employeesRef?.addValueEventListener(employeesListener!!)
+    }
+
+    private fun updateDashboardMap() {
+        if (!::mMap.isInitialized) return
+        val attSnapshot = attendanceSnapshot ?: return
+        val empSnapshot = employeesSnapshot ?: return
+
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val onlineList = mutableListOf<String>()
+        val offlineList = mutableListOf<String>()
+        var firstLocation: LatLng? = null
+
+        val employeeDataMap = mutableMapOf<String, MutableList<DataSnapshot>>()
+
+        for (employee in empSnapshot.children) {
+            if (!CompanyDataHelper.belongsToCurrentCompany(this@MainActivity, employee)) continue
+
+            val employeeName = employee.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
+                ?: employee.child("name").value?.toString()
+                ?: "Employee"
+
+            val normName = if (employeeName != "Employee") employeeName.trim().lowercase(Locale.getDefault()) else employee.key ?: "unknown"
+            employeeDataMap.getOrPut(normName) { mutableListOf() }.add(employee)
+        }
+
+        val seenEmployeeNames = HashSet<String>()
+
+        for ((normName, records) in employeeDataMap) {
+            var hasAttendance = false
+            var finalLat: Double? = null
+            var finalLng: Double? = null
+            var finalName = "Employee"
+
+            for (record in records) {
+                val deviceId = record.key ?: ""
+                val androidId = record.child("androidId").value?.toString() ?: ""
+                val uid = record.child("uid").value?.toString() ?: ""
+                val phone = record.child("phoneNumber").value?.toString() ?: record.child("mobileNumber").value?.toString() ?: ""
+
+                val name = record.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
+                    ?: record.child("name").value?.toString()
+                    ?: "Employee"
+                
+                if (name != "Employee") {
+                    finalName = name
+                }
+
+                if (attSnapshot.child(deviceId).hasChild(todayKey) ||
+                    (androidId.isNotBlank() && attSnapshot.child(androidId).hasChild(todayKey)) ||
+                    (uid.isNotBlank() && attSnapshot.child(uid).hasChild(todayKey)) ||
+                    (phone.isNotBlank() && attSnapshot.child(phone).hasChild(todayKey)) ||
+                    (name != "Employee" && attSnapshot.child(name).hasChild(todayKey))
+                ) {
+                    hasAttendance = true
+                }
+
+                val lat = record.child("latitude").value?.toString()?.toDoubleOrNull()
+                val lng = record.child("longitude").value?.toString()?.toDoubleOrNull()
+                if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
+                    finalLat = lat
+                    finalLng = lng
+                }
+            }
+
+            if (hasAttendance) {
+                onlineList.add(finalName)
+            } else {
+                offlineList.add(finalName)
+            }
+
+            if (finalLat != null && finalLng != null) {
+                val location = LatLng(finalLat, finalLng)
+                seenEmployeeNames.add(finalName)
+
+                val existingMarker = employeeMarkers[finalName]
+                if (existingMarker != null) {
+                    existingMarker.position = location
+                    if (finalName == followedEmployeeName) {
+                        existingMarker.showInfoWindow()
+                    }
+                } else {
+                    val newMarker = mMap.addMarker(
+                        MarkerOptions().position(location).title(finalName)
+                    )
+                    if (newMarker != null) {
+                        employeeMarkers[finalName] = newMarker
+                    }
+                }
+
+                if (finalName == followedEmployeeName) {
+                    mMap.animateCamera(CameraUpdateFactory.newLatLng(location))
+                }
+
+                checkGeofenceTransitions(finalName, finalLat, finalLng)
+
+                if (firstLocation == null) {
+                    firstLocation = location
+                }
+            }
+        }
+
+        val markersToRemove = employeeMarkers.keys.filter { it !in seenEmployeeNames }
+        for (name in markersToRemove) {
+            employeeMarkers[name]?.remove()
+            employeeMarkers.remove(name)
+            if (name == followedEmployeeName) {
+                followedEmployeeName = null
+            }
+        }
+
+        onlineEmployeesText.text = "🟢 Online Employees (${onlineList.size})"
+        onlineEmployeesNames.text = onlineList.joinToString(", ")
+
+        offlineEmployeesText.text = "🔴 Offline Employees (${offlineList.size})"
+        offlineEmployeesNames.text = offlineList.joinToString(", ")
+
+        if (!hasCenteredCameraOnce) {
+            firstLocation?.let {
+                mMap.moveCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        it,
+                        15f
+                    )
+                )
+                hasCenteredCameraOnce = true
+            }
+        }
+    }
+
+    override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
+        
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                mMap.isMyLocationEnabled = true
+            } catch (_: SecurityException) {}
 
-        mMap.mapType =
-            GoogleMap.MAP_TYPE_SATELLITE
+            val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                if (location != null) {
+                    val currentLatLng = LatLng(location.latitude, location.longitude)
+                    mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, 15f))
+                }
+            }
+        } else {
+            requestPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
 
+        mMap.mapType = GoogleMap.MAP_TYPE_SATELLITE
         mMap.uiSettings.isMapToolbarEnabled = true
 
         mMap.setOnMarkerClickListener { marker ->
             followedEmployeeName = marker.title
-            mMap.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(marker.position, 18f)
-            )
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(marker.position, 18f))
             marker.showInfoWindow()
-            false  // ← Ab Toolbar Nazar Aayega
+            false
         }
 
         mMap.setOnMapLongClickListener { latLng ->
@@ -277,175 +551,7 @@ class MainActivity : AppCompatActivity(),
         }
 
         loadDashboardGeofences()
-
-        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-
-        FirebaseDatabase
-            .getInstance()
-            .getReference("attendance")
-            .addValueEventListener(object : ValueEventListener {
-                override fun onDataChange(attSnapshot: DataSnapshot) {
-                    FirebaseDatabase
-                        .getInstance()
-                        .getReference("employees")
-                        .addValueEventListener(
-                            object : ValueEventListener {
-
-                                override fun onDataChange(
-                                    snapshot: DataSnapshot
-                                ) {
-
-                                    val onlineList =
-                                        mutableListOf<String>()
-
-                                    val offlineList =
-                                        mutableListOf<String>()
-
-                                    var firstLocation:
-                                            LatLng? = null
-
-                                    val seenEmployeeNames = HashSet<String>()
-                                    val seenEmployeeNorms = HashSet<String>()
-
-                                    for (employee in snapshot.children) {
-
-                                        val deviceId = employee.key ?: ""
-
-                                        val latitude =
-                                            employee.child("latitude")
-                                                .value?.toString()
-                                                ?.toDoubleOrNull()
-
-                                        val longitude =
-                                            employee.child("longitude")
-                                                .value?.toString()
-                                                ?.toDoubleOrNull()
-
-                                        val employeeName =
-                                            employee.child("employeeName")
-                                                .value?.toString()
-                                                ?.takeIf { it.isNotBlank() }
-                                                ?: employee.child("name")
-                                                    .value?.toString()
-                                                    ?: "Employee"
-
-                                        val normName = employeeName.trim().lowercase(Locale.getDefault())
-
-                                        // Ensure each employee is counted only once on dashboard
-                                        if (employeeName != "Employee") {
-                                            if (seenEmployeeNorms.contains(normName)) {
-                                                continue
-                                            }
-                                            seenEmployeeNorms.add(normName)
-                                        }
-
-                                        val hasAttendance = attSnapshot.child(deviceId).hasChild(todayKey) ||
-                                                           (employeeName != "Employee" && attSnapshot.child(employeeName).hasChild(todayKey))
-
-                                        if (hasAttendance) {
-                                            onlineList.add(
-                                                employeeName
-                                            )
-                                        } else {
-                                            offlineList.add(
-                                                employeeName
-                                            )
-                                        }
-
-                                        if (
-                                            latitude != null &&
-                                            longitude != null
-                                        ) {
-
-                                            val location =
-                                                LatLng(
-                                                    latitude,
-                                                    longitude
-                                                )
-
-                                            seenEmployeeNames.add(employeeName)
-
-                                            val existingMarker = employeeMarkers[employeeName]
-                                            if (existingMarker != null) {
-                                                existingMarker.position = location
-                                                if (employeeName == followedEmployeeName) {
-                                                    existingMarker.showInfoWindow()
-                                                }
-                                            } else {
-                                                val newMarker = mMap.addMarker(
-                                                    MarkerOptions()
-                                                        .position(location)
-                                                        .title(employeeName)
-                                                )
-                                                if (newMarker != null) {
-                                                    employeeMarkers[employeeName] = newMarker
-                                                }
-                                            }
-
-                                            if (employeeName == followedEmployeeName) {
-                                                mMap.animateCamera(
-                                                    CameraUpdateFactory.newLatLng(location)
-                                                )
-                                            }
-
-                                            checkGeofenceTransitions(employeeName, latitude, longitude)
-
-                                            if (
-                                                firstLocation ==
-                                                null
-                                            ) {
-
-                                                firstLocation =
-                                                    location
-                                            }
-                                        }
-                                    }
-
-                                    val markersToRemove = employeeMarkers.keys.filter { it !in seenEmployeeNames }
-                                    for (name in markersToRemove) {
-                                        employeeMarkers[name]?.remove()
-                                        employeeMarkers.remove(name)
-                                        if (name == followedEmployeeName) {
-                                            followedEmployeeName = null
-                                        }
-                                    }
-
-                                    onlineEmployeesText.text =
-                                        "🟢 Online Employees (${onlineList.size})"
-
-                                    onlineEmployeesNames.text =
-                                        onlineList.joinToString(", ")
-
-                                    offlineEmployeesText.text =
-                                        "🔴 Offline Employees (${offlineList.size})"
-
-                                    offlineEmployeesNames.text =
-                                        offlineList.joinToString(", ")
-
-                                    if (!hasCenteredCameraOnce) {
-                                        firstLocation?.let {
-                                            mMap.moveCamera(
-                                                CameraUpdateFactory
-                                                    .newLatLngZoom(
-                                                        it,
-                                                        15f
-                                                    )
-                                            )
-                                            hasCenteredCameraOnce = true
-                                        }
-                                    }
-                                }
-
-                                override fun onCancelled(
-                                    error: DatabaseError
-                                ) {
-                                }
-                            }
-                        )
-                }
-
-                override fun onCancelled(error: DatabaseError) {}
-            })
+        setupFirebaseListeners()
     }
 
     // ===================== GEOFENCE (SIMPLE CUSTOM INPUT + CONFIRM) =====================
@@ -602,116 +708,49 @@ class MainActivity : AppCompatActivity(),
                         snapshot: DataSnapshot
                     ) {
 
-                        var pending = 0
-                        var progress = 0
-                        var resolved = 0
+                        var compTotalAll = 0
+                        var compResolvedAll = 0
+                        var resolvedToday = 0
+                        val progressEmployees = HashSet<String>()
 
-                        val progressEmployees =
-                            HashSet<String>()
-
-                        val todayStart = java.util.Calendar
-                            .getInstance()
-                            .apply {
-                                set(
-                                    java.util.Calendar.HOUR_OF_DAY,
-                                    0
-                                )
-                                set(
-                                    java.util.Calendar.MINUTE,
-                                    0
-                                )
-                                set(
-                                    java.util.Calendar.SECOND,
-                                    0
-                                )
-                                set(
-                                    java.util.Calendar.MILLISECOND,
-                                    0
-                                )
-                            }
-                            .timeInMillis
+                        val todayStart = java.util.Calendar.getInstance().apply {
+                            set(java.util.Calendar.HOUR_OF_DAY, 0)
+                            set(java.util.Calendar.MINUTE, 0)
+                            set(java.util.Calendar.SECOND, 0)
+                            set(java.util.Calendar.MILLISECOND, 0)
+                        }.timeInMillis
 
                         for (item in snapshot.children) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@MainActivity, item)) continue
 
-                            val status =
-                                item.child("status")
-                                    .getValue(String::class.java)
-                                    ?: "Pending"
+                            compTotalAll++
 
-                            if (
-                                status.equals(
-                                    "Resolved",
-                                    true
-                                )
-                            ) {
+                            val status = item.child("status").getValue(String::class.java) ?: "Pending"
+                            val assignedTo = item.child("assignedTo").getValue(String::class.java) ?: ""
 
-                                val resolvedTime =
-                                    item.child("resolvedTime")
-                                        .getValue(Long::class.java)
-                                        ?: 0L
-
-                                if (
-                                    resolvedTime >= todayStart
-                                ) {
-
-                                    resolved++
-
+                            if (status.equals("Resolved", true)) {
+                                compResolvedAll++
+                                val resolvedTime = item.child("resolvedTime").getValue(Long::class.java) ?: 0L
+                                if (resolvedTime >= todayStart) {
+                                    resolvedToday++
                                 }
-
                             } else {
-
-                                val assignedTo =
-                                    item.child("assignedTo")
-                                        .getValue(String::class.java)
-                                        ?: ""
-
-                                if (
-                                    assignedTo.isNotEmpty()
-                                ) {
-
-                                    progressEmployees.add(
-                                        assignedTo
-                                    )
-
+                                if (assignedTo.isNotEmpty()) {
+                                    progressEmployees.add(assignedTo)
                                 }
-
                             }
-
                         }
 
-                        progress =
-                            progressEmployees.size
+                        val progress = progressEmployees.size
+                        var pending = compTotalAll - progress - compResolvedAll
+                        if (pending < 0) pending = 0
 
-                        pending =
-                            snapshot.childrenCount.toInt() -
-                                    progress -
-                                    snapshot.children.count {
-                                        it.child("status")
-                                            .getValue(String::class.java)
-                                            ?.equals(
-                                                "Resolved",
-                                                true
-                                            ) == true
-                                    }
+                        val total = pending + progress
 
-                        if (pending < 0) {
-                            pending = 0
-                        }
-
-                        val total =
-                            pending + progress
-
-                        totalComplaintText.text =
-                            "$total\nTotal"
-
-                        pendingComplaintText.text =
-                            "$pending\nPending"
-
-                        inProgressText.text =
-                            "$progress\nProgress"
-
-                        resolvedText.text =
-                            "$resolved\nResolved"
+                        totalComplaintText.text = "$total\nTotal"
+                        pendingComplaintText.text = "$pending\nPending"
+                        inProgressText.text = "$progress\nProgress"
+                        resolvedText.text = "$resolvedToday\nResolved"
 
                     }
 

@@ -103,7 +103,7 @@ object VersionChecker {
         apkUrl: String
     ) {
         val message = if (notes.isNotEmpty())
-            "New version $versionName is available.\n\n$notes"
+            notes.trim()
         else
             "New version $versionName is available."
 

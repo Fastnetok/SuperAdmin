@@ -82,11 +82,8 @@ class NewConnectionProgressActivity : AppCompatActivity() {
                             connection.seenTime = 0L
                         }
 
-                        val currentScore = if (connection.assignedTime > 0) connection.assignedTime else connection.createdTime
                         val front = frontOfQueue
-                        val frontScore = if (front != null) (if (front.assignedTime > 0) front.assignedTime else front.createdTime) else 0L
-
-                        if (frontOfQueue == null || currentScore > frontScore) {
+                        if (front == null || connection.displayOrder < front.displayOrder) {
                             frontOfQueue = connection
                         }
                     }
@@ -94,7 +91,7 @@ class NewConnectionProgressActivity : AppCompatActivity() {
                     frontOfQueue?.let { progressList.add(it) }
                 }
 
-                progressList.sortByDescending { it.assignedTime }
+                progressList.sortBy { it.displayOrder }
                 adapter.notifyDataSetChanged()
             }
 

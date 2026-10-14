@@ -1,6 +1,8 @@
 package com.example.superadmin.superadmin.companymanager
 
 import android.os.Bundle
+import android.widget.Button
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -8,8 +10,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import android.widget.Button
-import android.widget.Toast
 import com.example.superadmin.R
 import com.google.firebase.auth.FirebaseAuth
 
@@ -42,7 +42,8 @@ class CompanyManagerActivity : AppCompatActivity() {
         adapter = CompanyAdapter(
             companies = emptyList(),
             onEditClick = { company -> EditCompanyDialog.show(this, company, viewModel) },
-            onDeleteClick = { company -> EditCompanyDialog.show(this, company, viewModel) }
+            onTestResetClick = { company -> CompanyResetHelper.promptTestReset(this, company, viewModel) },
+            onDeleteClick = { company -> CompanyDeleteHelper.promptSecureDelete(this, company, viewModel) }
         )
 
         rvCompanies.layoutManager = LinearLayoutManager(this)
@@ -54,6 +55,12 @@ class CompanyManagerActivity : AppCompatActivity() {
 
         viewModel.companies.observe(this) { companies ->
             adapter.updateList(companies)
+        }
+
+        viewModel.operationResult.observe(this) { message ->
+            if (!message.isNullOrBlank()) {
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
         }
 
         viewModel.loadCompanies()

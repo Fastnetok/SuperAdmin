@@ -197,6 +197,7 @@ class OfficeGeofenceActivity : AppCompatActivity() {
             val uniqueEmpMap = mutableMapOf<String, GeofenceEmp>()
 
             for (emp in empSnap.children) {
+                if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
                 val rawName = emp.child("employeeName").value?.toString()
                     ?.takeIf { it.isNotBlank() }
                     ?: emp.child("name").value?.toString()

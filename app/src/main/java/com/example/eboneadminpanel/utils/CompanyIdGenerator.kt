@@ -13,29 +13,43 @@ object CompanyIdGenerator {
     }
 
     fun generateNextId(cityPrefix: String, callback: IdGeneratedCallback) {
-        val counterRef = db.collection(FirestorePaths.COUNTERS).document(cityPrefix)
+        val normalizedPrefix = cityPrefix.trim().uppercase()
+        val prefixWithDash = "$normalizedPrefix-"
 
-        db.runTransaction { transaction ->
-            val snapshot = transaction.get(counterRef)
-            val lastNumber = if (snapshot.exists()) {
-                snapshot.getLong(FirestorePaths.FIELD_LAST_NUMBER) ?: 0L
-            } else {
-                0L
+        db.collection(FirestorePaths.COMPANIES).get()
+            .addOnSuccessListener { snapshot ->
+                var maxNumber = 0
+
+                for (doc in snapshot.documents) {
+                    val compId = (doc.getString("companyId")?.trim() ?: doc.id.trim()).uppercase()
+                    if (compId.startsWith(prefixWithDash)) {
+                        val numPart = compId.substringAfter(prefixWithDash).takeWhile { it.isDigit() }
+                        val num = numPart.toIntOrNull()
+                        if (num != null && num > maxNumber) {
+                            maxNumber = num
+                        }
+                    } else if (compId.startsWith(normalizedPrefix)) {
+                        val numPart = compId.substringAfter(normalizedPrefix).takeWhile { it.isDigit() }
+                        val num = numPart.toIntOrNull()
+                        if (num != null && num > maxNumber) {
+                            maxNumber = num
+                        }
+                    }
+                }
+
+                val nextNumber = maxNumber + 1
+                val paddedNumber = nextNumber.toString().padStart(3, '0')
+                val newCompanyId = "$normalizedPrefix-$paddedNumber"
+
+                // Sync counter in COUNTERS collection
+                db.collection(FirestorePaths.COUNTERS)
+                    .document(normalizedPrefix)
+                    .set(mapOf(FirestorePaths.FIELD_LAST_NUMBER to nextNumber))
+
+                callback.onIdGenerated(newCompanyId)
             }
-            val nextNumber = lastNumber + 1
-
-            transaction.set(
-                counterRef,
-                mapOf(FirestorePaths.FIELD_LAST_NUMBER to nextNumber)
-            )
-
-            nextNumber
-        }.addOnSuccessListener { nextNumber ->
-            val paddedNumber = nextNumber.toString().padStart(4, '0')
-            val companyId = "$cityPrefix-$paddedNumber"
-            callback.onIdGenerated(companyId)
-        }.addOnFailureListener { e ->
-            callback.onError(e.message ?: "Company ID banate waqt error aaya")
-        }
+            .addOnFailureListener { e ->
+                callback.onError(e.message ?: "Company ID banate waqt error aaya")
+            }
     }
 }

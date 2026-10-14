@@ -18,6 +18,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.superadmin.core.SessionManager
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,7 +27,6 @@ class IspPanelSettingsActivity : AppCompatActivity() {
     private lateinit var accountsContainer: LinearLayout
 
     companion object {
-        private const val PREFS_FILE = "isp_panel_prefs"
         private const val KEY_ACCOUNTS = "all_accounts_json"
         private const val MASTER_OVERRIDE_PASSWORD = "1912"
 
@@ -77,6 +77,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             if (isp.equals("ZONG", ignoreCase = true)) {
                 if (zone.equals("Okara", ignoreCase = true)) {
                     preferredZongOkaraComplaintAccount(arr)?.let { return it.optString("username") }
+                    return null
                 } else if (zone.equals("Renala", ignoreCase = true)) {
                     for (i in 0 until arr.length()) {
                         try {
@@ -84,7 +85,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                             val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
                             val isRenala = accountZone(obj).equals("Renala", ignoreCase = true)
                             val isFranchiseAccount = !obj.optBoolean("isDealer", false)
-                            if (isZong && isFranchiseAccount && isRenala) {
+                            val uname = normalizedUsername(obj.optString("username"))
+                            if (isZong && isFranchiseAccount && (isRenala || uname.startsWith("RN") || uname.contains("RN")) && uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
                                 return obj.getString("username")
                             }
                         } catch (_: Exception) { }
@@ -92,24 +94,25 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     for (i in 0 until arr.length()) {
                         try {
                             val obj = arr.getJSONObject(i)
+                            val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
+                            val isFranchiseAccount = !obj.optBoolean("isDealer", false)
                             val uname = normalizedUsername(obj.optString("username"))
-                            if (obj.optString("isp").equals("ZONG", ignoreCase = true) &&
-                                !obj.optBoolean("isDealer", false) &&
-                                uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
+                            if (isZong && isFranchiseAccount && (uname.startsWith("RN") || uname.contains("RN")) && uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
                                 return obj.getString("username")
                             }
                         } catch (_: Exception) { }
                     }
                     return null
                 }
+                return null
             }
-            
+
             // Pass 1: Non-dealer, exact ISP + exact Zone match (case-insensitive)
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
-                        !obj.optBoolean("isDealer", false) && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
+                        !obj.optBoolean("isDealer", false) &&
                         accountZone(obj).equals(zone, ignoreCase = true)) {
                         return obj.getString("username")
                     }
@@ -120,7 +123,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
                         !obj.optBoolean("isDealer", false)) {
                         return obj.getString("username")
                     }
@@ -136,7 +139,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     }
                 } catch (_: Exception) { }
             }
-            
+
             return null
         }
 
@@ -146,6 +149,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             if (isp.equals("ZONG", ignoreCase = true)) {
                 if (zone.equals("Okara", ignoreCase = true)) {
                     preferredZongOkaraComplaintAccount(arr)?.let { return it.optString("password") }
+                    return null
                 } else if (zone.equals("Renala", ignoreCase = true)) {
                     for (i in 0 until arr.length()) {
                         try {
@@ -153,7 +157,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                             val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
                             val isRenala = accountZone(obj).equals("Renala", ignoreCase = true)
                             val isFranchiseAccount = !obj.optBoolean("isDealer", false)
-                            if (isZong && isFranchiseAccount && isRenala) {
+                            val uname = normalizedUsername(obj.optString("username"))
+                            if (isZong && isFranchiseAccount && (isRenala || uname.startsWith("RN") || uname.contains("RN")) && uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
                                 return obj.getString("password")
                             }
                         } catch (_: Exception) { }
@@ -161,18 +166,19 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     for (i in 0 until arr.length()) {
                         try {
                             val obj = arr.getJSONObject(i)
+                            val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
+                            val isFranchiseAccount = !obj.optBoolean("isDealer", false)
                             val uname = normalizedUsername(obj.optString("username"))
-                            if (obj.optString("isp").equals("ZONG", ignoreCase = true) &&
-                                !obj.optBoolean("isDealer", false) &&
-                                uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
+                            if (isZong && isFranchiseAccount && (uname.startsWith("RN") || uname.contains("RN")) && uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
                                 return obj.getString("password")
                             }
                         } catch (_: Exception) { }
                     }
                     return null
                 }
+                return null
             }
-            
+
             // Pass 1: Non-dealer, exact ISP + exact Zone match (case-insensitive)
             for (i in 0 until arr.length()) {
                 try {
@@ -189,7 +195,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
                         !obj.optBoolean("isDealer", false)) {
                         return obj.getString("password")
                     }
@@ -206,6 +212,30 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 } catch (_: Exception) { }
             }
             
+            return null
+        }
+
+        fun getSavedUrl(context: Context, isp: String, zone: String = "Okara"): String? {
+            val arr = safeAccountsArray(context) ?: return null
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
+                        accountZone(obj).equals(zone, ignoreCase = true)) {
+                        val u = obj.optString("url", "").trim()
+                        if (u.isNotEmpty()) return u
+                    }
+                } catch (_: Exception) { }
+            }
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optString("isp").equals(isp, ignoreCase = true)) {
+                        val u = obj.optString("url", "").trim()
+                        if (u.isNotEmpty()) return u
+                    }
+                } catch (_: Exception) { }
+            }
             return null
         }
 
@@ -337,18 +367,25 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             return if (parts.isEmpty()) "(no accounts saved)" else parts.joinToString(", ")
         }
 
+        private fun getPrefsName(context: Context): String {
+            val sessionManager = SessionManager(context)
+            val companyId = sessionManager.getCompanyId() ?: sessionManager.getActiveCompanyId() ?: "default"
+            return "isp_panel_prefs_${companyId.lowercase().replace("-", "_")}"
+        }
+
         private fun getPrefs(context: Context): SharedPreferences {
+            val prefsName = getPrefsName(context)
             val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
             return try {
                 EncryptedSharedPreferences.create(
-                    context, PREFS_FILE, masterKey,
+                    context, prefsName, masterKey,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
             } catch (e: Exception) {
                 Log.e("IspPanelSettingsActivity", "Corrupted encrypted prefs — recreating fresh", e)
-                context.getSharedPreferences(PREFS_FILE, MODE_PRIVATE).edit().clear().commit()
-                context.getSharedPreferences(PREFS_FILE, MODE_PRIVATE)
+                context.getSharedPreferences(prefsName, MODE_PRIVATE).edit().clear().commit()
+                context.getSharedPreferences(prefsName, MODE_PRIVATE)
             }
         }
     }
@@ -399,7 +436,13 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             }
 
             val detailsTv = TextView(this).apply {
-                text = "Username: $username\nPassword: ••••••••"
+                val urlStr = obj.optString("url", "").trim()
+                text = buildString {
+                    append("Username: $username\nPassword: ••••••••")
+                    if (urlStr.isNotEmpty()) {
+                        append("\nURL: $urlStr")
+                    }
+                }
                 textSize = 14f
                 setTextColor(Color.parseColor("#37474F"))
             }
@@ -445,12 +488,21 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         }
 
         val nameInput = EditText(this).apply { hint = "Account Nickname (e.g. Main Okara)" }
-        val ispSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
+        
+        // ISP Name: AutoCompleteTextView supporting selecting from suggestions or typing custom ISP name
+        val ispInput = AutoCompleteTextView(this).apply {
+            hint = "Select or Type ISP Name (e.g. EBONE, WATEEN, ZONG, JAZZ)"
+            setAdapter(ArrayAdapter(
                 this@IspPanelSettingsActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                listOf("EBONE", "WATEEN", "ZONG")
-            )
+                android.R.layout.simple_dropdown_item_1line,
+                listOf("EBONE", "WATEEN", "ZONG", "JAZZ")
+            ))
+            threshold = 1
+        }
+
+        val urlInput = EditText(this).apply {
+            hint = "ISP Login URL (optional, e.g. https://...)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
 
         val zoneSpinner = Spinner(this).apply {
@@ -479,8 +531,10 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
         layout.addView(TextView(this).apply { text = "Account Nickname:" })
         layout.addView(nameInput)
-        layout.addView(TextView(this).apply { text = "Select ISP:" })
-        layout.addView(ispSpinner)
+        layout.addView(TextView(this).apply { text = "ISP Name (Select or Add):" })
+        layout.addView(ispInput)
+        layout.addView(TextView(this).apply { text = "ISP Login URL:" })
+        layout.addView(urlInput)
         layout.addView(TextView(this).apply { text = "Select Zone / Branch:" })
         layout.addView(zoneSpinner)
         layout.addView(isDealerBox)
@@ -490,12 +544,17 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         layout.addView(TextView(this).apply { text = "Password:" })
         layout.addView(passwordInput)
 
+        val scrollView = ScrollView(this).apply {
+            addView(layout)
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Add ISP Panel Account")
-            .setView(layout)
+            .setView(scrollView)
             .setPositiveButton("Save") { _, _ ->
                 val name = nameInput.text.toString().trim()
-                val isp = ispSpinner.selectedItem.toString()
+                val isp = ispInput.text.toString().trim().ifBlank { "EBONE" }
+                val url = urlInput.text.toString().trim()
                 val zone = zoneSpinner.selectedItem.toString()
                 val isDealer = isDealerBox.isChecked
                 val dealerName = dealerNameInput.text.toString().trim()
@@ -515,6 +574,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     put("password", password)
                     put("isDealer", isDealer)
                     if (isDealer) put("dealerName", dealerName)
+                    if (url.isNotEmpty()) put("url", url)
                 }
                 all.put(name, obj)
                 saveAllAccountsJson(all)

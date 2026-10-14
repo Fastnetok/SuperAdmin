@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.*
 import java.util.Locale
 
@@ -50,7 +51,7 @@ class ProgressActivity : AppCompatActivity() {
     }
 
     private fun loadProgressComplaints() {
-        val fb = FirebaseDatabase.getInstance()
+        val fb = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
         val complaintsRef = fb.getReference("complaints")
         val empComplaintsRef = fb.getReference("employeeComplaints")
 
@@ -58,11 +59,13 @@ class ProgressActivity : AppCompatActivity() {
         var empSnap: DataSnapshot? = null
 
         fun refreshList() {
+            complaintList.clear()
             val latestComplaintMap = HashMap<String, Complaint>()
 
             val cSnap = mainSnap
             if (cSnap != null) {
                 for (item in cSnap.children) {
+                    if (!CompanyDataHelper.belongsToCurrentCompany(this@ProgressActivity, item)) continue
                     val complaint = item.getValue(Complaint::class.java) ?: continue
                     if (complaint.assignedTo.isNotEmpty() && !complaint.status.equals("Resolved", ignoreCase = true)) {
                         val (isSeen, seenTime) = checkSnapshotIsSeen(item)
@@ -80,53 +83,42 @@ class ProgressActivity : AppCompatActivity() {
                         val employeeName = complaint.assignedTo
                         val oldComplaint = latestComplaintMap[employeeName]
 
-                        val currentScore = if (complaint.assignedTime > 0) complaint.assignedTime else complaint.createdTime
-                        val oldScore = if (oldComplaint != null) (if (oldComplaint.assignedTime > 0) oldComplaint.assignedTime else oldComplaint.createdTime) else 0L
-
-                        if (oldComplaint == null || currentScore > oldScore) {
+                        if (oldComplaint == null || complaint.displayOrder < oldComplaint.displayOrder) {
                             latestComplaintMap[employeeName] = complaint
                         }
                     }
                 }
             }
 
-            // Cross-check with employeeComplaints node strictly by complaintId
             val eSnap = empSnap
             if (eSnap != null) {
                 for (empNode in eSnap.children) {
                     for (compNode in empNode.children) {
+                        if (!CompanyDataHelper.belongsToCurrentCompany(this@ProgressActivity, compNode)) continue
                         val compId = compNode.key ?: continue
                         val (isSeen, seenTime) = checkSnapshotIsSeen(compNode)
-
                         val compFromSnap = compNode.getValue(Complaint::class.java)
 
-                        // Match STRICTLY by complaintId
                         var matching = latestComplaintMap.values.find { it.complaintId == compId }
 
-                        // If not found in complaints node, construct complaint from employeeComplaints
                         if (matching == null && compFromSnap != null && compFromSnap.assignedTo.isNotBlank() && compFromSnap.complaintId == compId) {
                             if (!compFromSnap.status.equals("Resolved", ignoreCase = true)) {
                                 matching = compFromSnap
-                                if (matching.complaintId.isBlank()) matching.complaintId = compId
                                 val existingInMap = latestComplaintMap[matching.assignedTo]
-                                val currentScore = if (matching.assignedTime > 0) matching.assignedTime else matching.createdTime
-                                val existingScore = if (existingInMap != null) (if (existingInMap.assignedTime > 0) existingInMap.assignedTime else existingInMap.createdTime) else 0L
-                                if (existingInMap == null || currentScore > existingScore) {
+                                if (existingInMap == null || matching.displayOrder < existingInMap.displayOrder) {
                                     latestComplaintMap[matching.assignedTo] = matching
                                 }
                             }
                         }
 
-                        // Update seen status on matching complaint if found
                         if (isSeen && matching != null && matching.complaintId == compId) {
                             matching.seenByEmployee = true
-                            matching.seenTime = if (seenTime > 0) seenTime else (if (matching.seenTime > 0) matching.seenTime else System.currentTimeMillis())
+                            if (seenTime > 0) matching.seenTime = seenTime
                         }
                     }
                 }
             }
 
-            complaintList.clear()
             complaintList.addAll(latestComplaintMap.values)
             adapter.notifyDataSetChanged()
         }

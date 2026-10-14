@@ -36,6 +36,13 @@ jobs:
           echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
           echo "Building version: $VERSION_NAME (code $VERSION_CODE)"
 
+      - name: Get Commit Message
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "COMMIT_MSG<<EOF" >> $GITHUB_ENV
+          echo "$COMMIT_MSG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
@@ -50,8 +57,8 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_NAME }}
           name: Version ${{ env.VERSION_NAME }}
+          body: ${{ env.COMMIT_MSG }}
           files: app/build/outputs/apk/release/*.apk
-          generate_release_notes: true
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

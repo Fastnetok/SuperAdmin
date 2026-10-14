@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -141,29 +142,34 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         }
         root.addView(filterLabel)
 
-        // ISP Summary Cards
-        val summaryRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            weightSum = 3f
-            setPadding(dp(12), 0, dp(12), 0)
-        }
-        
-        val (eC, eT) = createSummaryCard("EBONE", orange)
-        val (wC, wT) = createSummaryCard("Wateen", navyMid)
-        val (zC, zT) = createSummaryCard("Zong", purple)
-        
-        cardEbone = eC; summaryEbone = eT
-        cardWateen = wC; summaryWateen = wT
-        cardZong = zC; summaryZong = zT
-        
-        cardEbone.setOnClickListener { toggleIspFilter("EBONE") }
-        cardWateen.setOnClickListener { toggleIspFilter("Wateen") }
-        cardZong.setOnClickListener { toggleIspFilter("Zong") }
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.isCompanyEnabled(this, currentZone, "EBONE") { eboneEnabled ->
+            val summaryRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                weightSum = if (eboneEnabled) 3f else 2f
+                setPadding(dp(12), 0, dp(12), 0)
+            }
+            
+            val (eC, eT) = createSummaryCard("EBONE", orange)
+            cardEbone = eC; summaryEbone = eT
+            cardEbone.setOnClickListener { toggleIspFilter("EBONE") }
+            if (eboneEnabled) {
+                summaryRow.addView(cardEbone)
+            }
 
-        summaryRow.addView(cardEbone)
-        summaryRow.addView(cardWateen)
-        summaryRow.addView(cardZong)
-        root.addView(summaryRow)
+            val (wC, wT) = createSummaryCard("Wateen", navyMid)
+            val (zC, zT) = createSummaryCard("Zong", purple)
+            
+            cardWateen = wC; summaryWateen = wT
+            cardZong = zC; summaryZong = zT
+            
+            cardWateen.setOnClickListener { toggleIspFilter("Wateen") }
+            cardZong.setOnClickListener { toggleIspFilter("Zong") }
+
+            summaryRow.addView(cardWateen)
+            summaryRow.addView(cardZong)
+            root.addView(summaryRow)
+        }
 
         totalText = TextView(this).apply {
             textSize = 18f
@@ -298,6 +304,7 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             .addOnSuccessListener { snapshot ->
                 masterList.clear()
                 snapshot.documents.forEach { doc ->
+                    if (!CompanyDataHelper.belongsToCurrentCompany(this@DealerRechargeReportActivity, doc)) return@forEach
                     val p = doc.getString("panel") ?: ""
                     val ispName = when(p.uppercase()) {
                         "EBONE", "EBILL" -> "EBONE"

@@ -22,6 +22,7 @@ class CompanyViewModel : ViewModel() {
         repository.getAllCompanies(object : CompanyRepository.CompanyListCallback {
             override fun onSuccess(companies: List<Company>) {
                 _companies.value = companies
+                repository.cleanOrphanedData()
             }
 
             override fun onError(message: String) {
@@ -44,6 +45,49 @@ class CompanyViewModel : ViewModel() {
         licenseStatus: String,
         licenseExpiry: Long
     ) {
+        val cleanEmail = adminEmail.trim().lowercase()
+
+        if (cleanEmail.isNotEmpty()) {
+            repository.checkEmailExists(cleanEmail, null, object : CompanyRepository.EmailCheckCallback {
+                override fun onResult(exists: Boolean) {
+                    if (exists) {
+                        _operationResult.value = "Error: Yeh email ($cleanEmail) pehle se kisi company ke paas registered hai!"
+                        return
+                    }
+                    proceedAddingCompany(
+                        companyName, city, ownerName, cleanEmail, adminPassword,
+                        maxManagers, maxSupervisors, maxEmployees, maxCustomers, maxDealers,
+                        licenseStatus, licenseExpiry
+                    )
+                }
+
+                override fun onError(message: String) {
+                    _operationResult.value = "Error: $message"
+                }
+            })
+        } else {
+            proceedAddingCompany(
+                companyName, city, ownerName, cleanEmail, adminPassword,
+                maxManagers, maxSupervisors, maxEmployees, maxCustomers, maxDealers,
+                licenseStatus, licenseExpiry
+            )
+        }
+    }
+
+    private fun proceedAddingCompany(
+        companyName: String,
+        city: String,
+        ownerName: String,
+        cleanEmail: String,
+        adminPassword: String,
+        maxManagers: Int,
+        maxSupervisors: Int,
+        maxEmployees: Int,
+        maxCustomers: Int,
+        maxDealers: Int,
+        licenseStatus: String,
+        licenseExpiry: Long
+    ) {
         val cityPrefix = Constants.CITY_PREFIXES[city] ?: city.take(3).uppercase()
 
         CompanyIdGenerator.generateNextId(cityPrefix, object : CompanyIdGenerator.IdGeneratedCallback {
@@ -53,7 +97,7 @@ class CompanyViewModel : ViewModel() {
                     companyName = companyName,
                     city = city,
                     ownerName = ownerName,
-                    adminEmail = adminEmail,
+                    adminEmail = cleanEmail,
                     adminPassword = adminPassword,
                     maxManagers = maxManagers,
                     maxSupervisors = maxSupervisors,
@@ -84,9 +128,50 @@ class CompanyViewModel : ViewModel() {
     }
 
     fun updateCompany(company: Company) {
-        repository.updateCompany(company, object : CompanyRepository.SimpleCallback {
+        val cleanEmail = company.adminEmail.trim().lowercase()
+        val companyToSave = company.copy(adminEmail = cleanEmail)
+
+        if (cleanEmail.isNotEmpty()) {
+            repository.checkEmailExists(cleanEmail, companyToSave.companyId, object : CompanyRepository.EmailCheckCallback {
+                override fun onResult(exists: Boolean) {
+                    if (exists) {
+                        _operationResult.value = "Error: Yeh email ($cleanEmail) pehle se kisi doosri company ke paas registered hai!"
+                        return
+                    }
+                    repository.updateCompany(companyToSave, object : CompanyRepository.SimpleCallback {
+                        override fun onSuccess() {
+                            _operationResult.value = "Company update ho gayi"
+                            loadCompanies()
+                        }
+
+                        override fun onError(message: String) {
+                            _operationResult.value = "Error: $message"
+                        }
+                    })
+                }
+
+                override fun onError(message: String) {
+                    _operationResult.value = "Error: $message"
+                }
+            })
+        } else {
+            repository.updateCompany(companyToSave, object : CompanyRepository.SimpleCallback {
+                override fun onSuccess() {
+                    _operationResult.value = "Company update ho gayi"
+                    loadCompanies()
+                }
+
+                override fun onError(message: String) {
+                    _operationResult.value = "Error: $message"
+                }
+            })
+        }
+    }
+
+    fun deleteCompany(companyId: String) {
+        repository.deleteCompany(companyId, object : CompanyRepository.SimpleCallback {
             override fun onSuccess() {
-                _operationResult.value = "Company update ho gayi"
+                _operationResult.value = "Company delete ho gayi"
                 loadCompanies()
             }
 
@@ -96,10 +181,10 @@ class CompanyViewModel : ViewModel() {
         })
     }
 
-    fun deleteCompany(companyId: String) {
-        repository.deleteCompany(companyId, object : CompanyRepository.SimpleCallback {
+    fun resetCompanyTestData(company: Company) {
+        repository.resetCompanyTestData(company.companyId, object : CompanyRepository.SimpleCallback {
             override fun onSuccess() {
-                _operationResult.value = "Company delete ho gayi"
+                _operationResult.value = "Company '${company.companyName}' (${company.companyId}) ka testing data reset ho gaya hai."
                 loadCompanies()
             }
 

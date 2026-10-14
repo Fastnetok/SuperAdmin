@@ -8,7 +8,10 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
+import com.example.superadmin.core.RoleManager
+import com.example.superadmin.core.SessionManager
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 
 class LoginActivity : AppCompatActivity() {
@@ -32,7 +35,7 @@ class LoginActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
 
         loginButton.setOnClickListener {
-            val email = emailInput.text.toString().trim()
+            val email = emailInput.text.toString().trim().lowercase()
             val password = passwordInput.text.toString().trim()
 
             if (email.isEmpty() || password.isEmpty()) {
@@ -47,17 +50,128 @@ class LoginActivity : AppCompatActivity() {
                 .addOnSuccessListener { result ->
                     ensureAdminAndProceed(result.user?.uid)
                 }
-                .addOnFailureListener { error ->
-                    loginButton.isEnabled = true
-                    statusText.text = "Login fail: ${error.message}"
+                .addOnFailureListener { authError ->
+                    // Fallback: Check if this email belongs to a registered company in Firestore
+                    checkFirestoreCompanyLogin(email, password, authError)
                 }
         }
 
-        // NEW: Forgot Password link
+        // Forgot Password link
         val forgotPasswordText = findViewById<TextView>(R.id.forgotPasswordText)
         forgotPasswordText.setOnClickListener {
             showForgotPasswordDialog()
         }
+    }
+
+    private fun checkFirestoreCompanyLogin(email: String, password: String, authError: Exception) {
+        db.collection("companies")
+            .whereEqualTo("adminEmail", email)
+            .get()
+            .addOnSuccessListener { querySnapshot ->
+                val companyDoc = querySnapshot.documents.firstOrNull()
+                if (companyDoc == null) {
+                    // Try case-insensitive fallback search
+                    db.collection("companies").get().addOnSuccessListener { allDocs ->
+                        val matched = allDocs.documents.firstOrNull { doc ->
+                            doc.getString("adminEmail")?.trim()?.equals(email, ignoreCase = true) == true
+                        }
+                        if (matched != null) {
+                            processCompanyLogin(matched, email, password)
+                        } else {
+                            loginButton.isEnabled = true
+                            statusText.text = "Login fail: ${authError.message}"
+                        }
+                    }.addOnFailureListener {
+                        loginButton.isEnabled = true
+                        statusText.text = "Login fail: ${authError.message}"
+                    }
+                    return@addOnSuccessListener
+                }
+                processCompanyLogin(companyDoc, email, password)
+            }
+            .addOnFailureListener {
+                loginButton.isEnabled = true
+                statusText.text = "Login fail: ${authError.message}"
+            }
+    }
+
+    private fun processCompanyLogin(
+        companyDoc: DocumentSnapshot,
+        email: String,
+        password: String
+    ) {
+        val savedPassword = companyDoc.getString("adminPassword") ?: ""
+        val licenseStatus = companyDoc.getString("licenseStatus") ?: "ACTIVE"
+        val licenseExpiry = companyDoc.getLong("licenseExpiry") ?: 0L
+        val companyName = companyDoc.getString("companyName") ?: ""
+        val companyId = companyDoc.getString("companyId")?.trim()?.uppercase()
+            ?.ifEmpty { companyDoc.id.trim().uppercase() } ?: companyDoc.id.trim().uppercase()
+
+        if (savedPassword.trim() != password.trim()) {
+            loginButton.isEnabled = true
+            statusText.text = "Login fail: Incorrect password for company admin"
+            return
+        }
+
+        if (licenseStatus.uppercase() != "ACTIVE" && licenseStatus.uppercase() != "DEMO") {
+            loginButton.isEnabled = true
+            statusText.text = "Login fail: Company license active nahi hai ($licenseStatus)"
+            return
+        }
+
+        if (licenseExpiry > 0 && licenseExpiry < System.currentTimeMillis()) {
+            loginButton.isEnabled = true
+            statusText.text = "Login fail: Company license expire ho chuki hai"
+            return
+        }
+
+        // Credentials & License are valid! Automatically register/authenticate in Firebase Auth
+        statusText.text = "Signing in..."
+        auth.createUserWithEmailAndPassword(email, password)
+            .addOnSuccessListener { createResult ->
+                val uid = createResult.user?.uid
+                if (uid != null) {
+                    db.collection("admins").document(uid).set(
+                        mapOf(
+                            "role" to "company_admin",
+                            "companyId" to companyId,
+                            "companyName" to companyName,
+                            "email" to email,
+                            "active" to true
+                        )
+                    ).addOnCompleteListener {
+                        ensureAdminAndProceed(uid)
+                    }
+                } else {
+                    ensureAdminAndProceed(null)
+                }
+            }
+            .addOnFailureListener {
+                // If createUser failed because account already exists, proceed with signIn
+                auth.signInWithEmailAndPassword(email, password)
+                    .addOnSuccessListener { signInResult ->
+                        val uid = signInResult.user?.uid
+                        if (uid != null) {
+                            db.collection("admins").document(uid).set(
+                                mapOf(
+                                    "role" to "company_admin",
+                                    "companyId" to companyId,
+                                    "companyName" to companyName,
+                                    "email" to email,
+                                    "active" to true
+                                )
+                            ).addOnCompleteListener {
+                                ensureAdminAndProceed(uid)
+                            }
+                        } else {
+                            ensureAdminAndProceed(null)
+                        }
+                    }
+                    .addOnFailureListener { signInError ->
+                        loginButton.isEnabled = true
+                        statusText.text = "Auth Error: ${signInError.message}"
+                    }
+            }
     }
 
     private fun showForgotPasswordDialog() {
@@ -101,27 +215,20 @@ class LoginActivity : AppCompatActivity() {
             return
         }
 
-        db.collection("admins")
-            .document(uid)
-            .get()
-            .addOnSuccessListener { document ->
-                if (!document.exists()) {
-                    db.collection("admins")
-                        .document(uid)
-                        .set(mapOf("role" to "owner", "active" to true))
-                        .addOnSuccessListener {
-                            proceedToNextScreen()
-                        }
-                        .addOnFailureListener {
-                            proceedToNextScreen()
-                        }
-                } else {
-                    proceedToNextScreen()
-                }
-            }
-            .addOnFailureListener {
+        RoleManager.checkCurrentUserRole(object : RoleManager.RoleCheckCallback {
+            override fun onRoleFound(role: String, companyId: String?) {
+                SessionManager(this@LoginActivity).saveSession(uid, role, companyId)
                 proceedToNextScreen()
             }
+
+            override fun onError(message: String) {
+                auth.signOut()
+                SessionManager(this@LoginActivity).clearSession()
+                statusText.text = message
+                loginButton.isEnabled = true
+                Toast.makeText(this@LoginActivity, message, Toast.LENGTH_LONG).show()
+            }
+        })
     }
 
     private fun proceedToNextScreen() {
@@ -135,13 +242,28 @@ class LoginActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Already signed in from a previous session?
-        val uid = auth.currentUser?.uid
-        if (uid != null && SetPinActivity.isPinSet(this)) {
-            startActivity(Intent(this, UnlockActivity::class.java))
-            finish()
-        } else if (uid != null) {
-            ensureAdminAndProceed(uid)
+        val currentUser = auth.currentUser
+        val uid = currentUser?.uid
+
+        if (uid != null) {
+            RoleManager.checkCurrentUserRole(object : RoleManager.RoleCheckCallback {
+                override fun onRoleFound(role: String, companyId: String?) {
+                    SessionManager(this@LoginActivity).saveSession(uid, role, companyId)
+                    if (SetPinActivity.isPinSet(this@LoginActivity)) {
+                        startActivity(Intent(this@LoginActivity, UnlockActivity::class.java))
+                        finish()
+                    } else {
+                        proceedToNextScreen()
+                    }
+                }
+
+                override fun onError(message: String) {
+                    auth.signOut()
+                    SessionManager(this@LoginActivity).clearSession()
+                    statusText.text = message
+                    loginButton.isEnabled = true
+                }
+            })
         }
     }
 }

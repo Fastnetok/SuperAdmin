@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.TextView
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
 import com.example.superadmin.superadmin.companymanager.CompanyManagerActivity
 import com.google.firebase.auth.FirebaseAuth
 
@@ -17,14 +19,49 @@ class MenuActivity : BaseAdminActivity() {
         val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
         Log.d("SuperAdminCheck", "Current User Email: '$currentUserEmail'")
         val menuManageCompanies = findViewById<TextView>(R.id.menuManageCompanies)
+        val menuCityManagement = findViewById<TextView>(R.id.menuCityManagement)
 
         if (currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true) {
             menuManageCompanies.visibility = View.VISIBLE
             menuManageCompanies.setOnClickListener {
                 startActivity(Intent(this, CompanyManagerActivity::class.java))
             }
+            menuCityManagement.visibility = View.VISIBLE
+            menuCityManagement.setOnClickListener {
+                startActivity(Intent(this, CityFranchiseManagementActivity::class.java))
+            }
         } else {
             menuManageCompanies.visibility = View.GONE
+            menuCityManagement.visibility = View.GONE
+        }
+
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: SessionManager(this).getActiveCompanyId() ?: "Okara"
+        Log.d("CityPermissionDebug", "MenuActivity currentZone evaluated to: '$currentZone'")
+
+        val menuViews = mapOf(
+            "New Complaint" to findViewById<TextView>(R.id.menuAddComplaint),
+            "Employee Biometric Attendance" to findViewById<TextView>(R.id.menuBiometricAttendance),
+            "Office Timings" to findViewById<TextView>(R.id.menuOfficeTimings),
+            "App Version Status" to findViewById<TextView>(R.id.menuAppVersion),
+            "Admin Management" to findViewById<TextView>(R.id.menuAddEmployee),
+            "All Employees" to findViewById<TextView>(R.id.menuAllEmployees),
+            "Reports" to findViewById<TextView>(R.id.menuReports),
+            "Movement Tracking" to findViewById<TextView>(R.id.menuMovementTracking),
+            "Customer Billing" to findViewById<TextView>(R.id.menuCustomerBilling),
+            "Add Customer" to findViewById<TextView>(R.id.menuAddCustomer),
+            "ISP Panel Settings" to findViewById<TextView>(R.id.menuIspPanelSettings),
+            "SMS Match Settings" to findViewById<TextView>(R.id.menuSmsMatchSettings),
+            "Dealer Panel" to findViewById<TextView>(R.id.menuDealerPanel),
+            "Auto Complaint Monitor" to findViewById<TextView>(R.id.menuAutoComplaintMonitor),
+            "Settings" to findViewById<TextView>(R.id.menuSettings)
+        )
+
+        for ((featureName, view) in menuViews) {
+            view?.let { v ->
+                CityPermissionManager.isFeatureEnabled(this, currentZone, featureName) { isEnabled ->
+                    v.visibility = if (isEnabled) View.VISIBLE else View.GONE
+                }
+            }
         }
 
         findViewById<TextView>(R.id.menuAddComplaint).setOnClickListener {
@@ -89,6 +126,11 @@ class MenuActivity : BaseAdminActivity() {
 
         findViewById<TextView>(R.id.menuLogout).setOnClickListener {
             FirebaseAuth.getInstance().signOut()
+            SessionManager(this).clearSession()
+            SetPinActivity.clearPin(this)
+            val intent = Intent(this, LoginActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
             finish()
         }
     }

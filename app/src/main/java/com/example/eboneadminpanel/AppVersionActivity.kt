@@ -163,9 +163,20 @@ class AppVersionActivity : AppCompatActivity() {
             .addOnSuccessListener { snap ->
                 cachedDevicesSnap = snap
                 
-                // First pass: count stats
-                var upToDate = 0; var outdated = 0; var never = 0
+                val uniqueMap = mutableMapOf<String, DataSnapshot>()
                 for (device in snap.children) {
+                    if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, device)) continue
+                    val rawName = device.child("employeeName").value?.toString() 
+                        ?: device.child("name").value?.toString() 
+                        ?: continue
+                    val normName = rawName.trim().lowercase(Locale.getDefault())
+                    if (!uniqueMap.containsKey(normName)) {
+                        uniqueMap[normName] = device
+                    }
+                }
+
+                var upToDate = 0; var outdated = 0; var never = 0
+                for ((_, device) in uniqueMap) {
                     val appVersion = device.child("appVersion").value?.toString() ?: ""
                     val isLatest = latestVersion.isNotEmpty() && appVersion == latestVersion
                     val hasVersion = appVersion.isNotEmpty()
@@ -194,10 +205,24 @@ class AppVersionActivity : AppCompatActivity() {
             "NEVER" -> "Never Opened Employees"
             else -> "Employee Version Details"
         }
+
+        val uniqueMap = mutableMapOf<String, DataSnapshot>()
+        for (device in snap.children) {
+            if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, device)) continue
+            val rawName = device.child("employeeName").value?.toString() 
+                ?: device.child("name").value?.toString() 
+                ?: continue
+            val normName = rawName.trim().lowercase(Locale.getDefault())
+            if (!uniqueMap.containsKey(normName)) {
+                uniqueMap[normName] = device
+            }
+        }
         
         var rowCount = 0
-        for (device in snap.children) {
-            val empName = device.child("employeeName").value?.toString() ?: continue
+        for ((_, device) in uniqueMap) {
+            val empName = device.child("employeeName").value?.toString() 
+                ?: device.child("name").value?.toString() 
+                ?: continue
             val appVersion = device.child("appVersion").value?.toString() ?: ""
             val lastSeen = (device.child("lastVersionUpdate").value as? Long) ?: 0L
 

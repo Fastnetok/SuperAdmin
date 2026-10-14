@@ -4,7 +4,9 @@ import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.*
+import java.util.Locale
 
 class TotalComplaintsActivity :
     AppCompatActivity() {
@@ -49,133 +51,56 @@ class TotalComplaintsActivity :
     }
 
     private fun loadEmployeeSummary() {
+        val rtdb = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
 
-        FirebaseDatabase
-            .getInstance()
-            .getReference("employees")
-            .addValueEventListener(
+        rtdb.getReference("employees").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(employeeSnapshot: DataSnapshot) {
+                rtdb.getReference("complaints").addValueEventListener(object : ValueEventListener {
+                    override fun onDataChange(complaintSnapshot: DataSnapshot) {
+                        summaryList.clear()
+                        val employeeMap = HashMap<String, Int>()
 
-                object : ValueEventListener {
+                        for (employee in employeeSnapshot.children) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@TotalComplaintsActivity, employee)) continue
 
-                    override fun onDataChange(
-                        employeeSnapshot: DataSnapshot
-                    ) {
+                            val employeeName = employee.child("employeeName").getValue(String::class.java)
+                                ?.takeIf { it.isNotBlank() }
+                                ?: employee.child("name").getValue(String::class.java)
+                                ?: continue
 
-                        FirebaseDatabase
-                            .getInstance()
-                            .getReference("complaints")
-                            .addValueEventListener(
+                            employeeMap[employeeName] = 0
+                        }
 
-                                object : ValueEventListener {
+                        for (complaint in complaintSnapshot.children) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@TotalComplaintsActivity, complaint)) continue
+                            val isNew = complaint.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                            val assignedTo = complaint.child("assignedTo").getValue(String::class.java) ?: ""
 
-                                    override fun onDataChange(
-                                        complaintSnapshot: DataSnapshot
-                                    ) {
+                            if (isNew || assignedTo == "NEW_CONNECTION_DASHBOARD" || assignedTo.isBlank()) continue
 
-                                        summaryList.clear()
+                            val status = complaint.child("status").getValue(String::class.java) ?: ""
+                            if (status.equals("Resolved", true)) continue
 
-                                        val employeeMap =
-                                            HashMap<String, Int>()
+                            val normAssigned = assignedTo.trim().lowercase(Locale.getDefault())
+                            val matchingEmp = employeeMap.keys.find { it.trim().lowercase(Locale.getDefault()) == normAssigned }
+                            val targetKey = matchingEmp ?: assignedTo
 
-                                        for (
-                                        employee
-                                        in employeeSnapshot.children
-                                        ) {
+                            employeeMap[targetKey] = (employeeMap[targetKey] ?: 0) + 1
+                        }
 
-                                            val employeeName =
-                                                employee.child(
-                                                    "employeeName"
-                                                ).getValue(
-                                                    String::class.java
-                                                ) ?: continue
+                        for (entry in employeeMap.entries) {
+                            summaryList.add(EmployeeComplaintSummary(entry.key, entry.value))
+                        }
 
-                                            employeeMap[
-                                                employeeName
-                                            ] = 0
-                                        }
-
-                                        for (
-                                        complaint
-                                        in complaintSnapshot.children
-                                        ) {
-                                            val isNew = complaint.child("isNewConnection").getValue(Boolean::class.java) ?: false
-                                            val assignedTo = complaint.child("assignedTo").getValue(String::class.java) ?: ""
-
-                                            // SKIP New Connections from Total Complaints list
-                                            if (isNew || assignedTo == "NEW_CONNECTION_DASHBOARD") continue
-
-                                            val status =
-                                                complaint.child(
-                                                    "status"
-                                                ).getValue(
-                                                    String::class.java
-                                                ) ?: ""
-
-                                            if (
-                                                status.equals(
-                                                    "Resolved",
-                                                    true
-                                                )
-                                            ) {
-
-                                                continue
-                                            }
-
-                                            employeeMap[
-                                                assignedTo
-                                            ] =
-                                                (
-                                                        employeeMap[
-                                                            assignedTo
-                                                        ] ?: 0
-                                                        ) + 1
-                                        }
-
-                                        for (
-                                        entry
-                                        in employeeMap.entries
-                                        ) {
-
-                                            summaryList.add(
-
-                                                EmployeeComplaintSummary(
-
-                                                    entry.key,
-
-                                                    entry.value
-
-                                                )
-
-                                            )
-                                        }
-
-                                        summaryList.sortByDescending {
-                                            it.totalComplaints
-                                        }
-
-                                        adapter.notifyDataSetChanged()
-
-                                    }
-
-                                    override fun onCancelled(
-                                        error: DatabaseError
-                                    ) {
-                                    }
-
-                                }
-
-                            )
-
+                        summaryList.sortByDescending { it.totalComplaints }
+                        adapter.notifyDataSetChanged()
                     }
 
-                    override fun onCancelled(
-                        error: DatabaseError
-                    ) {
-                    }
+                    override fun onCancelled(error: DatabaseError) {}
+                })
+            }
 
-                }
-
-            )
-
+            override fun onCancelled(error: DatabaseError) {}
+        })
     }
 }

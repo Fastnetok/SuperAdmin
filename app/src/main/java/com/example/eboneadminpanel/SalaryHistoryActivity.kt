@@ -318,6 +318,7 @@ class SalaryHistoryActivity : AppCompatActivity() {
         db.getReference("employees").get().addOnSuccessListener { snap ->
             employeeMap.clear()
             for (emp in snap.children) {
+                if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
                 val name = emp.child("employeeName").value?.toString() ?: continue
                 val did = emp.key ?: continue
                 val sal = (emp.child("salary").value as? Number)?.toDouble() ?: 0.0

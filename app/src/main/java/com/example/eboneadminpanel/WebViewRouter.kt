@@ -13,6 +13,7 @@ object WebViewRouter {
             cleanIsp == "WATEEN" -> WateenWebViewActivity::class.java
             cleanIsp == "ZONG" && cleanZone.equals("Renala", ignoreCase = true) -> ZongRenalaWebViewActivity::class.java
             cleanIsp == "ZONG" -> ZongOkaraWebViewActivity::class.java
+            cleanIsp == "JAZZ" -> JazzWebViewActivity::class.java
             else -> EboneWebViewActivity::class.java
         }
     }

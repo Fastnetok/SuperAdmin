@@ -1799,7 +1799,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     val balanceStr = balanceMatch?.groupValues?.get(1)?.replace(",", "")
                     val balance = balanceStr?.toDoubleOrNull()
                     if (balance != null) {
-                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { _ ->
+                        FranchiseBalanceManager.updateBalance(this, "EBONE", balance, targetZone) { _ ->
                             FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone)
                         }
                         setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
@@ -2026,7 +2026,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     "wateenBalance_$targetZone"
                 }
 
-                FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) { _ ->
+                FranchiseBalanceManager.updateBalance(this, "WATEEN", balance, targetZone) { _ ->
                     FranchiseBalanceManager.checkAndNotifyLowBalance(
                         this,
                         "WATEEN",
@@ -2194,7 +2194,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
             if (balance != null) {
                 val fieldName = if (targetZone.equals("Okara", ignoreCase = true)) "zongBalance" else "zongBalance_$targetZone"
-                FranchiseBalanceManager.updateBalance("ZONG", balance, targetZone) { _ ->
+                FranchiseBalanceManager.updateBalance(this, "ZONG", balance, targetZone) { _ ->
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "ZONG", balance, targetZone)
                 }
                 setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })

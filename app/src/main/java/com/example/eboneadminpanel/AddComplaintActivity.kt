@@ -8,6 +8,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.CityPermissionManager
+import com.example.superadmin.core.CompanyDataHelper
+import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -33,44 +36,64 @@ class AddComplaintActivity : AppCompatActivity() {
         val loginButton = findViewById<Button>(R.id.ocrButton)
         val assignButton = findViewById<Button>(R.id.assignComplaintButton)
 
-        // Selected company is kept only for the current complaint flow.
         var selectedCompany = ""
 
         loginButton.setOnClickListener {
-            val ispList = arrayOf(
-                "Ebone (ebill.pk)",
-                "Wateen (wateen.com)",
-                "Zong (turbonet.zong.com.pk)"
-            )
+            val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+            CityPermissionManager.isCompanyEnabled(this, currentZone, "EBONE") { eboneEnabled ->
+                CityPermissionManager.isCompanyEnabled(this, currentZone, "WATEEN") { wateenEnabled ->
+                    CityPermissionManager.isCompanyEnabled(this, currentZone, "ZONG") { zongEnabled ->
+                        CityPermissionManager.isCompanyEnabled(this, currentZone, "JAZZ") { jazzEnabled ->
+                            val list = mutableListOf<String>()
+                            val ispMappings = mutableListOf<Pair<String, String>>()
+                            if (eboneEnabled) {
+                                list.add("Ebone (ebill.pk)")
+                                ispMappings.add("EBONE" to "Okara")
+                            }
+                            if (wateenEnabled) {
+                                list.add("Wateen (wateen.com)")
+                                ispMappings.add("WATEEN" to "Okara")
+                            }
+                            if (zongEnabled) {
+                                list.add("Zong (turbonet.zong.com.pk)")
+                                ispMappings.add("ZONG" to "Okara")
+                            }
+                            if (jazzEnabled) {
+                                list.add("Jazz (biz.jazzftth.pk)")
+                                ispMappings.add("JAZZ" to "Okara")
+                            }
 
-            AlertDialog.Builder(this)
-                .setTitle("Select ISP")
-                .setItems(ispList) { _, which ->
-                    val (selectedISP, selectedZone) = when (which) {
-                        0 -> "EBONE" to "Okara"
-                        1 -> "WATEEN" to "Okara"
-                        else -> "ZONG" to "Okara"
-                    }
+                            if (list.isEmpty()) {
+                                Toast.makeText(this, "No ISP enabled for this company", Toast.LENGTH_SHORT).show()
+                                return@isCompanyEnabled
+                            }
 
-                    selectedCompany = selectedISP
+                            AlertDialog.Builder(this)
+                                .setTitle("Select ISP")
+                                .setItems(list.toTypedArray()) { _, which ->
+                                    val (selectedISP, selectedZone) = ispMappings[which]
+                                    selectedCompany = selectedISP
 
-                    val targetActivity = WebViewRouter.getTargetActivity(selectedISP, selectedZone)
-                    val intent = Intent(this, targetActivity).apply {
-                        putExtra("selected_isp", selectedISP)
-                        putExtra("target_zone", selectedZone)
-                        putExtra("zone", selectedZone)
+                                    val targetActivity = WebViewRouter.getTargetActivity(selectedISP, selectedZone)
+                                    val intent = Intent(this, targetActivity).apply {
+                                        putExtra("selected_isp", selectedISP)
+                                        putExtra("target_zone", selectedZone)
+                                        putExtra("zone", selectedZone)
 
-                        // NEW: Pass existing User ID if present so WebView can auto-search
-                        val currentId = userIdInput.text.toString().trim()
-                        if (currentId.isNotEmpty()) {
-                            putExtra("auto_activate_customer_id", currentId)
+                                        val currentId = userIdInput.text.toString().trim()
+                                        if (currentId.isNotEmpty()) {
+                                            putExtra("auto_activate_customer_id", currentId)
+                                        }
+                                    }
+
+                                    webViewLauncher.launch(intent)
+                                }
+                                .setNegativeButton("Cancel", null)
+                                .show()
                         }
                     }
-
-                    webViewLauncher.launch(intent)
                 }
-                .setNegativeButton("Cancel", null)
-                .show()
+            }
         }
 
         assignButton.setOnClickListener {
@@ -85,53 +108,93 @@ class AddComplaintActivity : AppCompatActivity() {
             }
 
             val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-            val fb = FirebaseDatabase.getInstance()
+            val fb = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
 
-            // Step 1: Load all employees & deduplicate strictly by normalized employee name
+            // Step 1: Load all employees across Root and Company nodes
             fb.getReference("employees").get().addOnSuccessListener { empSnapshot ->
-                class UniqueEmp(
-                    var displayName: String,
-                    var primaryDeviceId: String,
-                    val allDeviceIds: MutableSet<String> = mutableSetOf()
-                )
+                fb.getReference("employeePins").get().addOnSuccessListener { pinSnapshot ->
+                    fb.getReference("ApprovedDevices").get().addOnSuccessListener { appSnapshot ->
+                        fb.getReference("companies").get().addOnSuccessListener { companiesSnapshot ->
 
-                val uniqueEmpMap = mutableMapOf<String, UniqueEmp>()
+                            class UniqueEmp(
+                                var displayName: String,
+                                var primaryDeviceId: String,
+                                var isOnlineStatus: Boolean = false,
+                                val allDeviceIds: MutableSet<String> = mutableSetOf()
+                            )
 
-                for (child in empSnapshot.children) {
-                    val rawName = child.child("employeeName").getValue(String::class.java)
-                        ?.takeIf { it.isNotBlank() }
-                        ?: child.child("name").getValue(String::class.java)
-                        ?: continue
-                    val deviceId = child.key ?: continue
-                    val normName = rawName.trim().lowercase(Locale.getDefault())
+                            val uniqueEmpMap = mutableMapOf<String, UniqueEmp>()
 
-                    val statusVal = child.child("status").getValue(String::class.java) ?: ""
-                    val existing = uniqueEmpMap.getOrPut(normName) {
-                        UniqueEmp(displayName = rawName, primaryDeviceId = deviceId)
-                    }
+                            fun processChild(child: DataSnapshot, parentCompanyId: String? = null) {
+                                if (!CompanyDataHelper.belongsToCurrentCompany(this@AddComplaintActivity, child, parentCompanyId)) {
+                                    return
+                                }
+                                val rawName = child.child("employeeName").getValue(String::class.java)?.takeIf { it.isNotBlank() }
+                                    ?: child.child("name").getValue(String::class.java)?.takeIf { it.isNotBlank() }
+                                    ?: child.child("empName").getValue(String::class.java)?.takeIf { it.isNotBlank() }
+                                    ?: child.child("fullName").getValue(String::class.java)?.takeIf { it.isNotBlank() }
+                                    ?: return
+                                val deviceId = child.key ?: return
+                                val normName = rawName.trim().lowercase(Locale.getDefault())
 
-                    existing.allDeviceIds.add(deviceId)
+                                val statusVal = child.child("status").getValue(String::class.java)?.uppercase(Locale.getDefault()) ?: ""
+                                val isOnlineFlag = child.child("isOnline").value == true || child.child("online").value == true
 
-                    if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
-                        existing.primaryDeviceId = deviceId
-                        existing.displayName = rawName
-                    }
-                }
+                                val existing = uniqueEmpMap.getOrPut(normName) {
+                                    UniqueEmp(displayName = rawName, primaryDeviceId = deviceId)
+                                }
 
-                val allEmployees = uniqueEmpMap.values.toList()
+                                existing.allDeviceIds.add(deviceId)
+                                existing.allDeviceIds.add(rawName)
+                                existing.allDeviceIds.add(normName)
+
+                                val phone = child.child("phoneNumber").value?.toString() ?: child.child("mobileNumber").value?.toString() ?: ""
+                                val cleanPhone = phone.replace("+", "").replace("-", "").replace(" ", "").trim()
+                                if (phone.isNotBlank()) existing.allDeviceIds.add(phone)
+                                if (cleanPhone.isNotBlank()) existing.allDeviceIds.add(cleanPhone)
+
+                                val pin = child.child("attendancePin").value?.toString() ?: child.child("pin").value?.toString() ?: ""
+                                if (pin.isNotBlank()) existing.allDeviceIds.add(pin)
+
+                                if (statusVal == "APPROVED" || statusVal == "ONLINE" || statusVal == "CHECKED_IN" || statusVal == "CHECKEDIN" || isOnlineFlag) {
+                                    existing.primaryDeviceId = deviceId
+                                    existing.displayName = rawName
+                                    existing.isOnlineStatus = true
+                                }
+                            }
+
+                            for (c in empSnapshot.children) processChild(c)
+                            for (c in pinSnapshot.children) processChild(c)
+                            for (c in appSnapshot.children) processChild(c)
+
+                            for (cSnap in companiesSnapshot.children) {
+                                val compKey = cSnap.key ?: ""
+                                for (c in cSnap.child("employees").children) processChild(c, compKey)
+                                for (c in cSnap.child("employeePins").children) processChild(c, compKey)
+                                for (c in cSnap.child("ApprovedDevices").children) processChild(c, compKey)
+                            }
+
+                            val allEmployees = uniqueEmpMap.values.toList()
 
                 // Step 2: Load attendance to see who is present today
                 fb.getReference("attendance").get().addOnSuccessListener { attSnapshot ->
                     val presentDeviceIds = mutableSetOf<String>()
                     for (empAtt in attSnapshot.children) {
-                        if (empAtt.hasChild(todayKey)) {
-                            presentDeviceIds.add(empAtt.key ?: "")
+                        val key = empAtt.key ?: ""
+                        if (key.isNotBlank()) presentDeviceIds.add(key)
+                        if (empAtt.hasChild(todayKey) || empAtt.childrenCount > 0L) {
+                            if (key.isNotBlank()) presentDeviceIds.add(key)
+                        }
+                        for (dateChild in empAtt.children) {
+                            if (dateChild.key == todayKey) {
+                                if (key.isNotBlank()) presentDeviceIds.add(key)
+                            }
                         }
                     }
 
                     // Step 3: Load complaints to count current workload
                     fb.getReference("complaints").get().addOnSuccessListener { compSnapshot ->
-                        val complaintCounts = mutableMapOf<String, Int>() // Normalized Name -> Count
+                        val complaintCounts = mutableMapOf<String, Int>()
                         for (comp in compSnapshot.children) {
                             val assignedTo = comp.child("assignedTo").getValue(String::class.java) ?: ""
                             val status = comp.child("status").getValue(String::class.java) ?: ""
@@ -149,7 +212,7 @@ class AddComplaintActivity : AppCompatActivity() {
                         val absentEmployees = mutableListOf<UniqueEmp>()
 
                         for (emp in allEmployees) {
-                            val isPresent = emp.allDeviceIds.any { presentDeviceIds.contains(it) }
+                            val isPresent = emp.isOnlineStatus || emp.allDeviceIds.any { presentDeviceIds.contains(it) }
                             if (isPresent) {
                                 presentEmployees.add(emp)
                             } else {
@@ -193,7 +256,6 @@ class AddComplaintActivity : AppCompatActivity() {
                                 val selectedEmployee = finalEmployeeNames[which]
                                 val currentTime = System.currentTimeMillis()
 
-                                // Normal complaints assignment logic
                                 repeatManager.checkRepeatComplaint(userId) { repeatInfo ->
                                     if (repeatInfo.isRepeat) {
                                         val resolveDate = if (repeatInfo.lastResolvedTime > 0) {
@@ -204,13 +266,15 @@ class AddComplaintActivity : AppCompatActivity() {
 
                                     val complaintId = fb.getReference("complaints").push().key ?: return@checkRepeatComplaint
 
+                                    val currentCompanyId = CompanyDataHelper.getCurrentCompanyId(this) ?: ""
                                     val complaint = Complaint(
                                         complaintId = complaintId,
                                         userId = userId,
                                         address = address,
                                         phoneNumber = phone,
                                         details = details,
-                                        company = selectedCompany,
+                                        company = if (selectedCompany.isNotBlank()) selectedCompany else currentCompanyId,
+                                        companyId = currentCompanyId,
                                         status = "Progress",
                                         assignedTo = selectedEmployee,
                                         assignedTime = currentTime,
@@ -218,7 +282,10 @@ class AddComplaintActivity : AppCompatActivity() {
                                     )
 
                                     fb.getReference("complaints").child(complaintId).setValue(complaint).addOnSuccessListener {
-                                        if (selectedCompany.isNotBlank()) {
+                                        if (currentCompanyId.isNotBlank()) {
+                                            fb.getReference("companies").child(currentCompanyId).child("complaints").child(complaintId).setValue(complaint)
+                                        }
+                                        if (selectedCompany.isNotBlank() && selectedCompany.uppercase(Locale.getDefault()) != currentCompanyId) {
                                             fb.getReference("companies").child(selectedCompany.uppercase(Locale.getDefault())).child("complaints").child(complaintId).setValue(complaint)
                                         }
                                         val normEmp = selectedEmployee.trim().lowercase(Locale.getDefault())
@@ -249,6 +316,9 @@ class AddComplaintActivity : AppCompatActivity() {
             }
         }
     }
+}
+}
+}
 
     private val webViewLauncher =
         registerForActivityResult(

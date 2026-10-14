@@ -256,9 +256,14 @@ class EboneWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
+        if (manualAction == "DEALER_TOPUP") {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            webView.loadUrl("https://partner.ebill.pk/logincheck")
+            return
+        }
+
         // Purge any stale cookies from other ISP / Zone sessions
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
 
         val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp, targetZone)
         if (!ispUsername.isNullOrEmpty()) {
@@ -300,7 +305,7 @@ class EboneWebViewActivity : AppCompatActivity() {
         if (loginAttemptInProgress) return
         loginAttemptInProgress = true
 
-        if (!forceAccountName.isNullOrBlank()) {
+        if (manualAction != "DEALER_TOPUP" && !forceAccountName.isNullOrBlank()) {
             val dealerUsername = IspPanelSettingsActivity.getDealerUsername(this, "EBONE", targetZone, forceAccountName!!)
             val dealerPassword = IspPanelSettingsActivity.getDealerPassword(this, "EBONE", targetZone, forceAccountName!!)
             if (!dealerUsername.isNullOrEmpty() && !dealerPassword.isNullOrEmpty()) {
@@ -309,26 +314,10 @@ class EboneWebViewActivity : AppCompatActivity() {
             }
         }
 
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "EBONE", targetZone)
-        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, "EBONE", targetZone)
-        if (!ispUsername.isNullOrEmpty() && !ispPassword.isNullOrEmpty()) {
-            doLoginWith(ispUsername, ispPassword)
-            return
-        }
-
-        val rawAccounts = securePrefs(PREFS_NAME).getString(KEY_ACCOUNTS, "") ?: ""
-        val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-        val active = securePrefs(PREFS_NAME).getString(KEY_ACTIVE, "") ?: ""
-        if (active.isNotEmpty() && accounts.has(active)) {
-            val acc = accounts.getJSONObject(active)
-            val username = acc.optString("username", "")
-            val password = acc.optString("password", "")
-            if (username.isNotEmpty() && password.isNotEmpty()) {
-                doLoginWith(username, password)
-                return
-            }
-        }
-        loginAttemptInProgress = false
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() } ?: "FASTNET"
+        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() } ?: "fastnet123"
+        doLoginWith(ispUsername, ispPassword)
+        return
     }
 
     private fun doLoginWith(username: String, password: String, attempt: Int = 1) {
@@ -613,12 +602,12 @@ class EboneWebViewActivity : AppCompatActivity() {
             if (smsId != null) {
                 db.collection("dealerTransactions").document(smsId).update(mapOf("status" to "COMPLETED", "transferStatus" to "TRANSFERRED", "transferredAt" to System.currentTimeMillis(), "transferResultText" to clean.take(500)))
                     .addOnCompleteListener { 
-                        setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("sms_payment_completed", true); putExtra("source_transaction_id", smsId) })
-                        finish() 
+                        webView.loadUrl("https://partner.ebill.pk/clients")
+                        webView.postDelayed({ readEboneFranchiseBalance() }, 1500)
                     }
             } else {
-                setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true) })
-                finish()
+                webView.loadUrl("https://partner.ebill.pk/clients")
+                webView.postDelayed({ readEboneFranchiseBalance() }, 1500)
             }
         }
     }
@@ -632,7 +621,7 @@ class EboneWebViewActivity : AppCompatActivity() {
                 if (text.isNotBlank()) {
                     val balance = Regex("Balance:\\s*(-?[0-9.,]+)").find(text)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
                     if (balance != null) {
-                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) {
+                        FranchiseBalanceManager.updateBalance(this, "EBONE", balance, targetZone) {
                             FranchiseBalanceManager.showUpdateNotification(this, "EBONE", balance, targetZone)
                             FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone)
                         }

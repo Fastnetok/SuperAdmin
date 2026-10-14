@@ -25,6 +25,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
+import com.example.superadmin.CityPermissionManager
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -35,7 +37,8 @@ import java.util.Locale
 class UnpaidPackageActivationActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
-    private val companies = listOf("EBONE", "WATEEN", "ZONG")
+    private val companies = mutableListOf("EBONE", "WATEEN", "ZONG")
+    private lateinit var companyAdapter: ArrayAdapter<String>
 
     private lateinit var spinnerCompany: Spinner
     private lateinit var search: AutoCompleteTextView
@@ -117,6 +120,21 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
         setContentView(R.layout.activity_unpaid_package_activation)
 
         spinnerCompany = findViewById(R.id.spinnerCompany)
+        companyAdapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            companies
+        )
+        spinnerCompany.adapter = companyAdapter
+
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
+            companies.clear()
+            companies.addAll(enabledCompanies)
+            if (::companyAdapter.isInitialized) {
+                companyAdapter.notifyDataSetChanged()
+            }
+        }
         search = findViewById(R.id.etCustomerSearch)
         customerUrl = findViewById(R.id.etCustomerUrl)
         tvCustomer = findViewById(R.id.tvCustomer)
@@ -250,11 +268,7 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
             }
         }
 
-        spinnerCompany.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            companies
-        )
+        spinnerCompany.adapter = companyAdapter
 
         spinnerCompany.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {

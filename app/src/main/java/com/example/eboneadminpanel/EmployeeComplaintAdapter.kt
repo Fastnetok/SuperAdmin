@@ -26,80 +26,35 @@ class EmployeeComplaintAdapter(
     }
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-
-        val userIdText: TextView =
-            itemView.findViewById(R.id.userIdText)
-
-        val tvLogCompany: TextView =
-            itemView.findViewById(R.id.tvLogCompany)
-
-        val viewOnlineCircle: View =
-            itemView.findViewById(R.id.viewOnlineCircle)
-
-        val addressText: TextView =
-            itemView.findViewById(R.id.addressText)
-
-        val phoneText: TextView =
-            itemView.findViewById(R.id.phoneText)
-
-        val assignedDateTimeText: TextView =
-            itemView.findViewById(R.id.assignedDateTimeText)
-
-        val editButton: Button =
-            itemView.findViewById(R.id.editButton)
-
-        val deleteButton: Button =
-            itemView.findViewById(R.id.deleteButton)
-
-        val moveButton: Button =
-            itemView.findViewById(R.id.moveButton)
-
-        val resolveButton: Button =
-            itemView.findViewById(R.id.resolveButton)
+        val userIdText: TextView = itemView.findViewById(R.id.userIdText)
+        val tvLogCompany: TextView = itemView.findViewById(R.id.tvLogCompany)
+        val viewOnlineCircle: View = itemView.findViewById(R.id.viewOnlineCircle)
+        val addressText: TextView = itemView.findViewById(R.id.addressText)
+        val phoneText: TextView = itemView.findViewById(R.id.phoneText)
+        val assignedDateTimeText: TextView = itemView.findViewById(R.id.assignedDateTimeText)
+        val editButton: Button = itemView.findViewById(R.id.editButton)
+        val deleteButton: Button = itemView.findViewById(R.id.deleteButton)
+        val moveButton: Button = itemView.findViewById(R.id.moveButton)
+        val resolveButton: Button = itemView.findViewById(R.id.resolveButton)
     }
 
-    override fun onCreateViewHolder(
-        parent: ViewGroup,
-        viewType: Int
-    ): ViewHolder {
-
-        val view = LayoutInflater.from(parent.context)
-            .inflate(
-                R.layout.item_employee_complaint,
-                parent,
-                false
-            )
-
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_employee_complaint, parent, false)
         return ViewHolder(view)
     }
 
-    override fun onBindViewHolder(
-        holder: ViewHolder,
-        position: Int
-    ) {
-
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val complaint = complaintList[position]
 
         holder.userIdText.text = complaint.userId
 
-        /*
-         * Company Badge — بالکل ProgressAdapter.kt والا exact logic۔
-         * Firebase ke company field se sirf actual company show hogi.
-         * Agar company purani complaint mein maujood nahi hai to
-         * badge hide rahega.
-         */
-        val company =
-            complaint.company
-                .trim()
-                .uppercase(Locale.getDefault())
+        val company = complaint.company.trim().uppercase(Locale.getDefault())
+        val isIsp = company in setOf("EBONE", "EBILL", "EBONE (EBILL.PK)", "WATEEN", "WATEEN.COM", "ZONG", "TURBONET.ZONG.COM.PK")
 
-        if (company.isEmpty()) {
-
+        if (company.isEmpty() || !isIsp) {
             holder.tvLogCompany.visibility = View.GONE
             holder.viewOnlineCircle.visibility = View.GONE
-
         } else {
-
             holder.tvLogCompany.text = when (company) {
                 "EBONE", "EBILL", "EBONE (EBILL.PK)" -> "EBONE"
                 "WATEEN", "WATEEN.COM" -> "WATEEN"
@@ -121,28 +76,16 @@ class EmployeeComplaintAdapter(
         holder.addressText.text = complaint.address
         holder.phoneText.text = complaint.phoneNumber
 
-        val formatter = SimpleDateFormat(
-            "dd MMM yyyy / hh:mm a",
-            Locale.getDefault()
-        )
-
-        holder.assignedDateTimeText.text =
-            "Assigned: " +
-                    formatter.format(
-                        Date(complaint.assignedTime)
-                    )
+        val formatter = SimpleDateFormat("dd MMM yyyy / hh:mm a", Locale.getDefault())
+        holder.assignedDateTimeText.text = "Assigned: " + formatter.format(Date(complaint.assignedTime))
 
         // RESOLVE
         holder.resolveButton.setOnClickListener {
-
             AlertDialog.Builder(holder.itemView.context)
                 .setTitle("Resolve Complaint")
-                .setMessage(
-                    "Are you sure you want to mark this complaint as resolved?"
-                )
+                .setMessage("Are you sure you want to mark this complaint as resolved?")
                 .setPositiveButton("Resolve") { _, _ ->
-
-                    FirebaseDatabase.getInstance()
+                    FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
                         .getReference("complaints")
                         .child(complaint.complaintId)
                         .updateChildren(
@@ -153,153 +96,75 @@ class EmployeeComplaintAdapter(
                             )
                         )
                         .addOnSuccessListener {
-
-                            Toast.makeText(
-                                holder.itemView.context,
-                                "Complaint Resolved",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(holder.itemView.context, "Complaint Resolved", Toast.LENGTH_SHORT).show()
                         }
                         .addOnFailureListener {
-
-                            Toast.makeText(
-                                holder.itemView.context,
-                                "Failed",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(holder.itemView.context, "Failed", Toast.LENGTH_SHORT).show()
                         }
                 }
-                .setNegativeButton(
-                    "Cancel",
-                    null
-                )
+                .setNegativeButton("Cancel", null)
                 .show()
         }
 
         // EDIT
         holder.editButton.setOnClickListener {
+            val dialogView = LayoutInflater.from(holder.itemView.context).inflate(R.layout.dialog_edit_complaint, null)
 
-            val dialogView =
-                LayoutInflater.from(
-                    holder.itemView.context
-                ).inflate(
-                    R.layout.dialog_edit_complaint,
-                    null
-                )
+            val editUserId = dialogView.findViewById<EditText>(R.id.editUserId)
+            val editPhone = dialogView.findViewById<EditText>(R.id.editPhone)
+            val editAddress = dialogView.findViewById<EditText>(R.id.editAddress)
 
-            val editUserId =
-                dialogView.findViewById<EditText>(
-                    R.id.editUserId
-                )
+            editUserId.setText(complaint.userId)
+            editPhone.setText(complaint.phoneNumber)
+            editAddress.setText(complaint.address)
 
-            val editPhone =
-                dialogView.findViewById<EditText>(
-                    R.id.editPhone
-                )
-
-            val editAddress =
-                dialogView.findViewById<EditText>(
-                    R.id.editAddress
-                )
-
-            editUserId.setText(
-                complaint.userId
-            )
-
-            editPhone.setText(
-                complaint.phoneNumber
-            )
-
-            editAddress.setText(
-                complaint.address
-            )
-
-            AlertDialog.Builder(
-                holder.itemView.context
-            )
+            AlertDialog.Builder(holder.itemView.context)
                 .setTitle("Edit Complaint")
                 .setView(dialogView)
                 .setPositiveButton("SAVE") { _, _ ->
-
-                    FirebaseDatabase.getInstance()
+                    FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
                         .getReference("complaints")
                         .child(complaint.complaintId)
                         .updateChildren(
                             mapOf(
-                                "userId" to
-                                        editUserId.text.toString(),
-
-                                "phoneNumber" to
-                                        editPhone.text.toString(),
-
-                                "address" to
-                                        editAddress.text.toString()
+                                "userId" to editUserId.text.toString(),
+                                "phoneNumber" to editPhone.text.toString(),
+                                "address" to editAddress.text.toString()
                             )
                         )
 
-                    Toast.makeText(
-                        holder.itemView.context,
-                        "Complaint Updated",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(holder.itemView.context, "Complaint Updated", Toast.LENGTH_SHORT).show()
                 }
-                .setNegativeButton(
-                    "CANCEL",
-                    null
-                )
+                .setNegativeButton("CANCEL", null)
                 .show()
         }
 
         // MOVE
         holder.moveButton.setOnClickListener {
-
-            FirebaseDatabase.getInstance()
+            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
                 .getReference("employees")
                 .get()
                 .addOnSuccessListener { snapshot ->
-
-                    val employeeNames =
-                        mutableListOf<String>()
+                    val employeeNames = mutableListOf<String>()
 
                     for (child in snapshot.children) {
-
-                        val name =
-                            child.child(
-                                "employeeName"
-                            ).getValue(
-                                String::class.java
-                            ) ?: ""
-
+                        val name = child.child("employeeName").getValue(String::class.java) ?: ""
                         if (name.isNotEmpty()) {
                             employeeNames.add(name)
                         }
                     }
 
                     if (employeeNames.isEmpty()) {
-
-                        Toast.makeText(
-                            holder.itemView.context,
-                            "Koi employee nahi mila",
-                            Toast.LENGTH_SHORT
-                        ).show()
-
+                        Toast.makeText(holder.itemView.context, "Koi employee nahi mila", Toast.LENGTH_SHORT).show()
                         return@addOnSuccessListener
                     }
 
-                    AlertDialog.Builder(
-                        holder.itemView.context
-                    )
-                        .setTitle(
-                            "Move Complaint To"
-                        )
-                        .setItems(
-                            employeeNames.toTypedArray()
-                        ) { _, which ->
+                    AlertDialog.Builder(holder.itemView.context)
+                        .setTitle("Move Complaint To")
+                        .setItems(employeeNames.toTypedArray()) { _, which ->
+                            val selectedName = employeeNames[which]
 
-                            val selectedName =
-                                employeeNames[which]
-
-                            FirebaseDatabase.getInstance()
+                            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
                                 .getReference("complaints")
                                 .child(complaint.complaintId)
                                 .updateChildren(
@@ -312,60 +177,32 @@ class EmployeeComplaintAdapter(
                                     )
                                 )
                                 .addOnSuccessListener {
-
-                                    Toast.makeText(
-                                        holder.itemView.context,
-                                        "Moved to $selectedName",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    Toast.makeText(holder.itemView.context, "Moved to $selectedName", Toast.LENGTH_SHORT).show()
                                 }
                         }
-                        .setNegativeButton(
-                            "Cancel",
-                            null
-                        )
+                        .setNegativeButton("Cancel", null)
                         .show()
                 }
         }
 
         // DELETE
         holder.deleteButton.setOnClickListener {
-
-            AlertDialog.Builder(
-                holder.itemView.context
-            )
-                .setTitle(
-                    "Delete Complaint"
-                )
-                .setMessage(
-                    "Are you sure you want to delete this complaint?"
-                )
-                .setPositiveButton(
-                    "YES"
-                ) { _, _ ->
-
-                    FirebaseDatabase.getInstance()
+            AlertDialog.Builder(holder.itemView.context)
+                .setTitle("Delete Complaint")
+                .setMessage("Are you sure you want to delete this complaint?")
+                .setPositiveButton("YES") { _, _ ->
+                    FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
                         .getReference("complaints")
                         .child(complaint.complaintId)
                         .removeValue()
                         .addOnSuccessListener {
-
-                            Toast.makeText(
-                                holder.itemView.context,
-                                "Complaint Deleted",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(holder.itemView.context, "Complaint Deleted", Toast.LENGTH_SHORT).show()
                         }
                 }
-                .setNegativeButton(
-                    "NO",
-                    null
-                )
+                .setNegativeButton("NO", null)
                 .show()
         }
     }
 
-    override fun getItemCount(): Int {
-        return complaintList.size
-    }
+    override fun getItemCount(): Int = complaintList.size
 }

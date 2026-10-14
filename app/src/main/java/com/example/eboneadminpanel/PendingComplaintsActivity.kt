@@ -1,5 +1,6 @@
 package com.example.superadmin
 
+import com.example.superadmin.core.CompanyDataHelper
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -72,16 +73,10 @@ class PendingComplaintsActivity :
 
                         complaintList.clear()
 
-                        for (
-                        complaintSnapshot
-                        in snapshot.children
-                        ) {
+                        for (complaintSnapshot in snapshot.children) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@PendingComplaintsActivity, complaintSnapshot)) continue
 
-                            val complaint =
-                                complaintSnapshot
-                                    .getValue(
-                                        Complaint::class.java
-                                    )
+                            val complaint = complaintSnapshot.getValue(Complaint::class.java)
 
                             if (
                                 complaint == null

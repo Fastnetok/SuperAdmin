@@ -23,6 +23,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
@@ -356,6 +357,7 @@ class AllComplaintsActivity : AppCompatActivity() {
                                 val complaintIds = mutableSetOf<String>()
 
                                 for (cs in complaintSnapshot.children) {
+                                    if (!CompanyDataHelper.belongsToCurrentCompany(this@AllComplaintsActivity, cs)) continue
                                     val isNewConn = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
                                     if (isNewConn) continue
 
@@ -387,6 +389,7 @@ class AllComplaintsActivity : AppCompatActivity() {
                                 }
 
                                 for (cs in resolvedSnapshot.children) {
+                                    if (!CompanyDataHelper.belongsToCurrentCompany(this@AllComplaintsActivity, cs)) continue
                                     val isNewConn = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
                                     if (isNewConn) continue
 

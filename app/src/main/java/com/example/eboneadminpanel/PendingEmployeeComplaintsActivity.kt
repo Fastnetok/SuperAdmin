@@ -113,10 +113,8 @@ class PendingEmployeeComplaintsActivity :
 
                         }
 
-                        employeeComplaints.sortByDescending {
-
-                            it.assignedTime
-
+                        employeeComplaints.sortBy {
+                            it.displayOrder
                         }
 
                         if (

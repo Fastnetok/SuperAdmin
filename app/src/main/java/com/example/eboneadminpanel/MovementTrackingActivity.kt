@@ -1,5 +1,6 @@
 package com.example.superadmin
 
+import com.example.superadmin.core.CompanyDataHelper
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -388,6 +389,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                     employeeMap.clear()
                     val names = mutableListOf<String>()
                     for (emp in snapshot.children) {
+                        if (!CompanyDataHelper.belongsToCurrentCompany(this@MovementTrackingActivity, emp)) continue
                         val id = emp.key ?: continue
                         val name = emp.child("employeeName").getValue(String::class.java) ?: "Employee"
                         val average = emp.child("bikeAverage").getValue(Double::class.java) ?: 0.0

@@ -12,6 +12,8 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.example.superadmin.CityPermissionManager
+import com.example.superadmin.core.CompanyDataHelper
 import com.example.superadmin.databinding.ActivityCustomerBillingBinding
 import com.example.superadmin.databinding.ItemNetworkRowBinding
 import com.example.superadmin.databinding.ItemTransactionRowBinding
@@ -35,7 +37,7 @@ class CustomerBillingActivity : AppCompatActivity() {
     private val failedDocs = mutableListOf<DocumentSnapshot>()
     private val allCustomerDocs = mutableListOf<DocumentSnapshot>()
 
-    private val companies = listOf("EBONE", "WATEEN", "ZONG")
+    private val companies = mutableListOf("EBONE", "WATEEN", "ZONG")
     private val providerByCustomerId = mutableMapOf<String, String>()
     private val packagePriceByCustomerId = mutableMapOf<String, Double>()
     private val packageIdByCustomerId = mutableMapOf<String, String>()
@@ -45,6 +47,13 @@ class CustomerBillingActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityCustomerBillingBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
+            companies.clear()
+            companies.addAll(enabledCompanies)
+            renderNetworkActivationBreakdown()
+        }
 
         binding.tvToday.text =
             SimpleDateFormat("EEE, dd MMM yyyy", Locale.getDefault()).format(Date())

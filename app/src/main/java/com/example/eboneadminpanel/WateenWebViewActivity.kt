@@ -1026,7 +1026,7 @@ class WateenWebViewActivity : AppCompatActivity() {
             
             if (balance != null) {
                 Log.d(TAG, "Franchise balance found: $balance")
-                FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) {
+                FranchiseBalanceManager.updateBalance(this, "WATEEN", balance, targetZone) {
                     FranchiseBalanceManager.showUpdateNotification(this, "WATEEN", balance, targetZone)
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "WATEEN", balance, targetZone)
                 }

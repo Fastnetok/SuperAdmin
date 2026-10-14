@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -152,6 +154,9 @@
         <activity android:name=".SendDealerPaymentActivity" android:exported="false" />
         <activity android:name=".DealerPaymentLogActivity" android:exported="false" />
 
+        <!-- City & Franchise Management -->
+        <activity android:name=".CityFranchiseManagementActivity" android:exported="false" />
+
         <!-- SMS Receiver -->
         <receiver
             android:name=".PaymentSmsReceiver"
@@ -183,6 +188,7 @@
         <activity android:name=".WateenWebViewActivity" android:exported="false" />
         <activity android:name=".ZongOkaraWebViewActivity" android:exported="false" />
         <activity android:name=".ZongRenalaWebViewActivity" android:exported="false" />
+        <activity android:name=".JazzWebViewActivity" android:exported="false" />
         <activity android:name=".DealerRechargeReportActivity" android:exported="false" />
 
         <!-- FileProvider for APK install -->

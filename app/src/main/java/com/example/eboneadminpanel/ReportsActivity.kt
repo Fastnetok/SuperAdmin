@@ -516,22 +516,13 @@ class ReportsActivity : AppCompatActivity() {
                             val assignedTo = item.child("assignedTo").getValue(String::class.java) ?: ""
                             if (assignedTo.isNotEmpty()) {
                                 progressEmployees.add(assignedTo)
+                            } else {
+                                pending++
                             }
                         }
                     }
 
                     progress = progressEmployees.size
-
-                    pending = snapshot.childrenCount.toInt() -
-                            progress -
-                            snapshot.children.count {
-                                it.child("status").getValue(String::class.java)?.equals("Resolved", true) == true
-                            }
-
-                    if (pending < 0) {
-                        pending = 0
-                    }
-
                     val total = pending + progress
 
                     adapter.updateHeader(

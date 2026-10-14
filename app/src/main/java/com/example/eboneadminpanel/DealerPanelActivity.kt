@@ -34,12 +34,14 @@ import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
 import androidx.core.util.Pair as AndroidPair
 import com.google.android.material.datepicker.MaterialDatePicker
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
+import com.example.superadmin.core.CompanyDataHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -375,14 +377,14 @@ class DealerPanelActivity : AppCompatActivity() {
         return row
     }
 
+    private var lastDealerQuery: com.google.firebase.firestore.QuerySnapshot? = null
+
     private fun refreshStatsRow() {
         statsContainer?.let {
             it.removeAllViews()
             it.addView(buildStatsCards())
-            // Also refresh lists based on selection
-            observeDealers()
-            observePending()
         }
+        lastDealerQuery?.let { renderDealers(it) } ?: observeDealers()
     }
 
     private fun sectionTitle(text: String): TextView = TextView(this).apply {
@@ -403,46 +405,50 @@ class DealerPanelActivity : AppCompatActivity() {
                     Toast.makeText(this, "Dealer list load failed: ${error?.message}", Toast.LENGTH_LONG).show()
                     return@addSnapshotListener
                 }
-
-                dealerList.removeAllViews()
-                dealerCount = query.size()
-                totalBalance = 0.0
-
-                if (query.isEmpty) {
-                    dealerList.addView(emptyState("No dealers yet — tap + to add one"))
-                }
-
-                var index = 1
-                query.documents.forEach { document ->
-                    val name = document.getString("name") ?: ""
-                    if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {
-                        return@forEach
-                    }
-
-                    val wateen = document.getDouble("wateenBalance") ?: 0.0
-                    val ebone = document.getDouble("eboneBalance") ?: 0.0
-                    val zong = document.getDouble("zongBalance") ?: 0.0
-                    val combined = wateen + ebone + zong
-                    totalBalance += combined
-                    dealerNameCache[document.id] = name.ifBlank { document.id }
-
-                    // Filtering Logic for Cards
-                    when (activeStatFilter) {
-                        "DEALERS" -> { /* show all */ }
-                        "PENDING" -> {
-                            if (!dealersWithPending.contains(document.id)) return@forEach
-                        }
-                        "TOTAL" -> {
-                            if (combined <= 0) return@forEach
-                        }
-                    }
-
-                    dealerList.addView(dealerCard(document.id, document, index++))
-                }
-
-                statDealersText.text = dealerCount.toString()
-                statBalanceText.text = "Rs. ${"%.0f".format(totalBalance)}"
+                lastDealerQuery = query
+                renderDealers(query)
             }
+    }
+
+    private fun renderDealers(query: com.google.firebase.firestore.QuerySnapshot) {
+        dealerList.removeAllViews()
+        dealerCount = query.size()
+        totalBalance = 0.0
+
+        if (query.isEmpty) {
+            dealerList.addView(emptyState("No dealers yet — tap + to add one"))
+        }
+
+        var index = 1
+        query.documents.forEach { document ->
+            val name = document.getString("name") ?: ""
+            if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {
+                return@forEach
+            }
+
+            val wateen = document.getDouble("wateenBalance") ?: 0.0
+            val ebone = document.getDouble("eboneBalance") ?: 0.0
+            val zong = document.getDouble("zongBalance") ?: 0.0
+            val combined = wateen + ebone + zong
+            totalBalance += combined
+            dealerNameCache[document.id] = name.ifBlank { document.id }
+
+            // Filtering Logic for Cards
+            when (activeStatFilter) {
+                "DEALERS" -> { /* show all */ }
+                "PENDING" -> {
+                    if (!dealersWithPending.contains(document.id)) return@forEach
+                }
+                "TOTAL" -> {
+                    if (combined <= 0) return@forEach
+                }
+            }
+
+            dealerList.addView(dealerCard(document.id, document, index++))
+        }
+
+        statDealersText.text = dealerCount.toString()
+        statBalanceText.text = "Rs. ${"%.0f".format(totalBalance)}"
     }
 
     private fun dealerCard(dealerId: String, document: DocumentSnapshot, index: Int): LinearLayout {
@@ -1053,7 +1059,7 @@ class DealerPanelActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (balance != null) {
                         // SAVE balance to Firebase so chips update
-                        FranchiseBalanceManager.updateBalance(isp, balance, zone) {
+                        FranchiseBalanceManager.updateBalance(this, isp, balance, zone) {
                             FranchiseBalanceManager.showUpdateNotification(this, isp, balance, zone)
                         }
                     } else {
@@ -1140,8 +1146,13 @@ class DealerPanelActivity : AppCompatActivity() {
         launchCheckBalance(next.first, next.second)
     }
 
+    private fun getFranchiseDocRef(): DocumentReference {
+        val companyId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        return db.collection("franchiseSettings").document(companyId)
+    }
+
     private fun observeFranchiseBalances() {
-        franchiseBalancesListener = db.collection("franchiseSettings").document("balances")
+        franchiseBalancesListener = getFranchiseDocRef()
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot == null || !snapshot.exists()) {
                     franchiseBalancesRow.removeAllViews()
@@ -1272,7 +1283,7 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun showThresholdSettingsDialog() {
-        val docRef = db.collection("franchiseSettings").document("balances")
+        val docRef = getFranchiseDocRef()
         docRef.get().addOnSuccessListener { snapshot ->
             val eboneInput = EditText(this).apply {
                 hint = "Ebone (Okara) alert (Rs.)"

@@ -43,7 +43,7 @@ object AddCompanyDialog {
                 val days = etExpiryDays.text.toString().toIntOrNull() ?: 30
                 val expiryMillis = System.currentTimeMillis() + (days * 24L * 60L * 60L * 1000L)
 
-                val result = CompanyValidator.validate(companyName, city, ownerName)
+                val result = CompanyValidator.validate(companyName, city, ownerName, adminEmail, adminPassword)
                 if (result.isValid) {
                     viewModel.addNewCompany(companyName, city, ownerName, adminEmail, adminPassword, maxMgr, maxSup, maxEmp, maxCust, maxDealers, status, expiryMillis)
                 } else {

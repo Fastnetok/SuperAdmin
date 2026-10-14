@@ -12,6 +12,8 @@ import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.CityPermissionManager
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -46,7 +48,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 class SendDealerPaymentActivity : AppCompatActivity() {
 
     private val db = FirebaseFirestore.getInstance()
-    private val companies = listOf("EBONE", "WATEEN", "ZONG")
+    private val companies = mutableListOf("EBONE", "WATEEN", "ZONG")
+    private lateinit var companyAdapter: ArrayAdapter<String>
 
     private var dealers: List<DocumentSnapshot> = emptyList()
     private var selectedDealerIndex = -1
@@ -81,6 +84,16 @@ class SendDealerPaymentActivity : AppCompatActivity() {
 
         setContentView(buildScreen())
         loadDealers()
+
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
+            companies.clear()
+            companies.addAll(enabledCompanies)
+            if (::companyAdapter.isInitialized) {
+                companyAdapter.notifyDataSetChanged()
+            }
+            selectedCompanyIndex = 0
+        }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -145,8 +158,9 @@ class SendDealerPaymentActivity : AppCompatActivity() {
         root.addView(spacer(16))
 
         root.addView(fieldLabel("Company / Panel"))
+        companyAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, companies)
         companySpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(this@SendDealerPaymentActivity, android.R.layout.simple_spinner_dropdown_item, companies)
+            adapter = companyAdapter
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
                     selectedCompanyIndex = pos
@@ -216,7 +230,9 @@ class SendDealerPaymentActivity : AppCompatActivity() {
     private fun loadDealers() {
         db.collection("dealers").orderBy("name").get()
             .addOnSuccessListener { snapshot ->
-                dealers = snapshot.documents
+                dealers = snapshot.documents.filter { doc ->
+                    CompanyDataHelper.belongsToCurrentCompany(this@SendDealerPaymentActivity, doc)
+                }
                 // NEW: show each dealer's zone tag in the dropdown (e.g.
                 // "Sajid (Renala)") so it's never ambiguous which
                 // franchise a manual payment will actually go through.
@@ -260,7 +276,7 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             statusText.text = "Please enter a valid amount."
             return
         }
-        val panel = companies[selectedCompanyIndex]
+        val panel = companies.getOrNull(selectedCompanyIndex) ?: companies.firstOrNull() ?: "WATEEN"
         val dealerDoc = dealers[selectedDealerIndex]
         val dealerName = dealerDoc.getString("name") ?: dealerDoc.id
         // NEW: the dealer's own zone tag — determines which franchise

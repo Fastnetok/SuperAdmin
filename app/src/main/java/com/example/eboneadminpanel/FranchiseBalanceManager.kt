@@ -9,6 +9,8 @@ import android.media.AudioAttributes
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import com.example.superadmin.core.CompanyDataHelper
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 
@@ -17,10 +19,12 @@ object FranchiseBalanceManager {
     private const val UPDATE_CHANNEL_ID = "auto_update_status_v4"
     private const val LOW_BALANCE_CHANNEL_ID = "franchise_low_balance"
 
-    private val doc by lazy {
-        FirebaseFirestore.getInstance()
+    private fun getDoc(context: Context, zone: String = "Okara"): DocumentReference {
+        val companyId = CompanyDataHelper.getCurrentCompanyId(context)
+            ?: if (zone.isNotBlank() && zone != "DEFAULT") zone.trim().uppercase() else "OKARA"
+        return FirebaseFirestore.getInstance()
             .collection("franchiseSettings")
-            .document("balances")
+            .document(companyId)
     }
 
     private fun panelKey(panel: String) = panel.trim().lowercase()
@@ -67,14 +71,14 @@ object FranchiseBalanceManager {
         manager.notify(7005 + (panel + zone).hashCode(), notification)
     }
 
-    fun updateBalance(panel: String, balance: Double, zone: String = "Okara", onDone: (Boolean) -> Unit = {}) {
-        doc.set(mapOf(balanceField(panel, zone) to balance), SetOptions.merge())
+    fun updateBalance(context: Context, panel: String, balance: Double, zone: String = "Okara", onDone: (Boolean) -> Unit = {}) {
+        getDoc(context, zone).set(mapOf(balanceField(panel, zone) to balance), SetOptions.merge())
             .addOnSuccessListener { onDone(true) }
             .addOnFailureListener { onDone(false) }
     }
 
     fun checkAndNotifyLowBalance(context: Context, panel: String, balance: Double, zone: String = "Okara") {
-        doc.get().addOnSuccessListener { snapshot ->
+        getDoc(context, zone).get().addOnSuccessListener { snapshot ->
             val zoneThreshold = snapshot.getDouble(thresholdField(panel, zone))
             val baseThreshold = snapshot.getDouble("${panelKey(panel)}LowBalanceThreshold")
             val threshold = zoneThreshold ?: baseThreshold ?: return@addOnSuccessListener
@@ -103,7 +107,7 @@ object FranchiseBalanceManager {
         manager.notify(("${panelKey(panel)}_$zone").hashCode(), notification)
     }
 
-    fun loadAll(callback: (Map<String, Any>) -> Unit) {
-        doc.get().addOnSuccessListener { snap -> callback(snap.data ?: emptyMap()) }.addOnFailureListener { callback(emptyMap()) }
+    fun loadAll(context: Context, zone: String = "Okara", callback: (Map<String, Any>) -> Unit) {
+        getDoc(context, zone).get().addOnSuccessListener { snap -> callback(snap.data ?: emptyMap()) }.addOnFailureListener { callback(emptyMap()) }
     }
 }

@@ -130,6 +130,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             userAgentString =
                 "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
         }
+        webView.clearFormData()
 
         if (debugTapInspectorEnabled) {
             webView.addJavascriptInterface(object {
@@ -164,6 +165,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", ZONE)
         val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", ZONE)
 
+        Log.e("ZONG_DEBUG", "🔍 ZongRenalaWebViewActivity -> ZONE=$ZONE, loaded username='$username' (Expected: rn-abbas046)")
         Log.d("ZongRenalaWebView", "Zong Renala → Login Started → Renala URL ($LOGIN_URL) → User: $username")
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
@@ -296,7 +298,10 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                     "var p=document.querySelector('input[name=password],#password');" +
                     "var b=document.querySelector('button[type=submit],#send,.btn-login');" +
                     "if(!u||!p)return 'not_ready';" +
+                    "u.value=''; p.value='';" +
                     "u.value='${jsEscape(username)}'; p.value='${jsEscape(password)}';" +
+                    "u.dispatchEvent(new Event('input', { bubbles: true }));" +
+                    "p.dispatchEvent(new Event('input', { bubbles: true }));" +
                     "if(b){ b.click(); return 'submitted'; }" +
                     "return 'no_button';" +
                     "})()"
@@ -322,15 +327,27 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         webView.evaluateJavascript(
             "(function(){" +
                     "var t=document.body.innerText||'';" +
-                    "var m=t.match(/Available\\s+Credit\\s+Rs\\.?\\s*([0-9,.]+)/i);" +
-                    "return m ? m[1] : null;" +
+                    "var m=t.match(/Available\\s+Credit\\s+Rs\\.?\\s*(-?[0-9,]+(?:\\.[0-9]+)?)/i);" +
+                    "if(m)return JSON.stringify({found:true,value:m[1]});" +
+                    "var m2=t.match(/Account\\s+Credit[^0-9\\-]*(-?[0-9,]+(?:\\.[0-9]+)?)/i);" +
+                    "if(m2)return JSON.stringify({found:true,value:m2[1]});" +
+                    "var m3=t.match(/Credit[^0-9\\-]*(-?[0-9,]+(?:\\.[0-9]+)?)/i);" +
+                    "if(m3)return JSON.stringify({found:true,value:m3[1]});" +
+                    "return JSON.stringify({found:false});" +
                     "})()"
-        ) { res ->
-            val balance = res?.removeSurrounding("\"")?.replace(",", "")?.toDoubleOrNull()
-            Log.d("ZongRenalaWebView", "Zong Renala → Balance Read attempt $attempt: $balance (raw: $res)")
+        ) { raw ->
+            val clean = raw.removeSurrounding("\"").replace("\\\"", "\"")
+            val balance = Regex("\"value\":\"(.*?)\"")
+                .find(clean)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.replace(",", "")
+                ?.toDoubleOrNull()
+
+            Log.d("ZongRenalaWebView", "Zong Renala → Balance Read attempt $attempt: $balance (raw: $raw)")
 
             if (balance != null) {
-                FranchiseBalanceManager.updateBalance("ZONG", balance, ZONE) {
+                FranchiseBalanceManager.updateBalance(this, "ZONG", balance, ZONE) {
                     FranchiseBalanceManager.showUpdateNotification(this, "ZONG", balance, ZONE)
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "ZONG", balance, ZONE)
                     setResult(RESULT_OK, Intent().apply {

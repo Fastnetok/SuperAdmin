@@ -3,6 +3,7 @@ package com.example.superadmin.superadmin.companymanager
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.superadmin.R
@@ -11,6 +12,7 @@ import com.example.superadmin.models.Company
 class CompanyAdapter(
     private var companies: List<Company>,
     private val onEditClick: (Company) -> Unit,
+    private val onTestResetClick: (Company) -> Unit,
     private val onDeleteClick: (Company) -> Unit
 ) : RecyclerView.Adapter<CompanyAdapter.CompanyViewHolder>() {
 
@@ -20,6 +22,9 @@ class CompanyAdapter(
         val tvCompanyCity: TextView = view.findViewById(R.id.tvCompanyCity)
         val tvLicenseStatus: TextView = view.findViewById(R.id.tvLicenseStatus)
         val tvLicenseLimits: TextView = view.findViewById(R.id.tvLicenseLimits)
+        val btnEditCompany: Button = view.findViewById(R.id.btnEditCompany)
+        val btnTestResetCompany: Button = view.findViewById(R.id.btnTestResetCompany)
+        val btnDeleteCompany: Button = view.findViewById(R.id.btnDeleteCompany)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CompanyViewHolder {
@@ -37,6 +42,10 @@ class CompanyAdapter(
         holder.tvLicenseLimits.text = "Mgr: ${company.maxManagers} | Sup: ${company.maxSupervisors} | Emp: ${company.maxEmployees} | Cust: ${company.maxCustomers} | Dlr: ${company.maxDealers}"
 
         holder.itemView.setOnClickListener { onEditClick(company) }
+        holder.btnEditCompany.setOnClickListener { onEditClick(company) }
+        holder.btnTestResetCompany.setOnClickListener { onTestResetClick(company) }
+        holder.btnDeleteCompany.setOnClickListener { onDeleteClick(company) }
+
         holder.itemView.setOnLongClickListener {
             onDeleteClick(company)
             true
