@@ -42,11 +42,16 @@ android {
     buildTypes {
 
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("debug")
         }
 
         release {
-            signingConfig = signingConfigs.getByName("release")
+            val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
+            signingConfig = if (isGitHub) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("release")
+            }
 
             isMinifyEnabled = false
 
