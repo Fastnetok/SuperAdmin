@@ -137,14 +137,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
     }
 
     private fun checkAllQueuesFinished() {
-        if (complaintList.isNotEmpty() && adapter.onlineStatusMap.size >= complaintList.size) {
-            if (!allFinishedBeepPlayed) {
-                allFinishedBeepPlayed = true
-                Handler(Looper.getMainLooper()).postDelayed({
-                    playBeeps(3, 300) // All complete -> 3 beeps with 300ms gap
-                }, 800)
-            }
-        }
+        // Triple beep removed as requested
     }
 
     private fun startCheckingQueues() {

@@ -136,12 +136,6 @@ class CustomerListActivity : AppCompatActivity() {
             finish()
         }
 
-        spinnerIsp.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            listOf("All ISPs", "Ebone", "Wateen", "Zong")
-        )
-
         rv.layoutManager = LinearLayoutManager(this)
         rv.setHasFixedSize(false)
 
@@ -302,30 +296,69 @@ class CustomerListActivity : AppCompatActivity() {
             updateSuggestions()
         }
 
-        spinnerIsp.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
+        val currentZone = com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this) ?: com.example.superadmin.core.SessionManager(this).getActiveCompanyId() ?: "Okara"
+        val canonicalDocId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(currentZone)
 
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                ) {
-                    ispFilter = when (position) {
-                        1 -> "EBONE"
-                        2 -> "WATEEN"
-                        3 -> "ZONG"
-                        else -> "ALL"
+        db.collection("franchiseSettings").document(canonicalDocId)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+                val ispList = mutableListOf("All ISPs")
+                val defaultIsps = listOf("EBONE", "WATEEN", "ZONG")
+                for (isp in defaultIsps) {
+                    val isEnabled = if (snapshot.exists() && enabledMap != null && enabledMap.containsKey(isp)) {
+                        (enabledMap[isp] as? Boolean) ?: true
+                    } else {
+                        true
                     }
-
-                    // Keep the current search text while changing ISP.
-                    // Suggestions automatically change to the selected ISP.
-                    renderCustomerList(currentDocs)
+                    if (isEnabled) {
+                        ispList.add(isp.lowercase().replaceFirstChar { it.uppercase() })
+                    }
                 }
 
-                override fun onNothingSelected(parent: AdapterView<*>?) {
-                    ispFilter = "ALL"
-                    renderCustomerList(currentDocs)
+                spinnerIsp.adapter = ArrayAdapter(
+                    this,
+                    android.R.layout.simple_spinner_dropdown_item,
+                    ispList
+                )
+
+                spinnerIsp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        val selected = parent?.getItemAtPosition(position).toString()
+                        ispFilter = if (selected.equals("All ISPs", true)) {
+                            "ALL"
+                        } else {
+                            selected.uppercase(Locale.getDefault())
+                        }
+                        renderCustomerList(currentDocs)
+                    }
+
+                    override fun onNothingSelected(parent: AdapterView<*>?) {
+                        ispFilter = "ALL"
+                        renderCustomerList(currentDocs)
+                    }
+                }
+            }
+            .addOnFailureListener {
+                spinnerIsp.adapter = ArrayAdapter(
+                    this,
+                    android.R.layout.simple_spinner_dropdown_item,
+                    listOf("All ISPs", "Ebone", "Wateen", "Zong")
+                )
+                spinnerIsp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        val selected = parent?.getItemAtPosition(position).toString()
+                        ispFilter = if (selected.equals("All ISPs", true)) {
+                            "ALL"
+                        } else {
+                            selected.uppercase(Locale.getDefault())
+                        }
+                        renderCustomerList(currentDocs)
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) {
+                        ispFilter = "ALL"
+                        renderCustomerList(currentDocs)
+                    }
                 }
             }
 

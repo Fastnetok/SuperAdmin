@@ -320,14 +320,35 @@
 
             </LinearLayout>
 
-            <fragment
-                android:id="@+id/dashboardMap"
-                android:name="com.google.android.gms.maps.SupportMapFragment"
+            <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="406dp"
                 android:layout_marginTop="4dp"
                 android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp" />
+                android:layout_marginEnd="8dp">
+
+                <fragment
+                    android:id="@+id/dashboardMap"
+                    android:name="com.google.android.gms.maps.SupportMapFragment"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <!-- Bottom-Right Radius Cycle Floating Button -->
+                <Button
+                    android:id="@+id/dashboardRadiusCycleButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:layout_marginBottom="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@android:color/transparent"
+                    android:padding="8dp"
+                    android:text="Off"
+                    android:textColor="#FFFFFF"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
+            </FrameLayout>
 
             <TextView
                 android:id="@+id/onlineEmployeesText"

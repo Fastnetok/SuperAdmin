@@ -124,6 +124,7 @@
         <!-- FIX: CustomerBillingActivity launches this Activity. -->
         <activity android:name=".UnpaidPackageActivationActivity" android:exported="false" />
         <activity android:name=".ReliefLogActivity" />
+        <activity android:name=".CompanyLogActivity" android:exported="false" />
 
         <activity android:name=".AddCustomerActivity" android:exported="false" />
         <activity android:name=".IspPanelSettingsActivity" android:exported="false" />

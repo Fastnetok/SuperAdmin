@@ -346,7 +346,11 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
         // should leave every 1-7 day checkbox unchecked; a checkbox
         // should only ever show as checked because the admin tapped it.
         clearReliefDaySelection()
-        loadCustomersForCompany(companies.first())
+        if (companies.isNotEmpty()) {
+            loadCustomersForCompany(companies.first())
+        } else {
+            loadCustomersForCompany("EBONE")
+        }
     }
 
     private fun buildQuickDayButtons() {
@@ -609,6 +613,7 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
                 results.getOrNull(1) as? com.google.firebase.firestore.QuerySnapshot
 
             customerSnapshot?.documents?.forEach { doc ->
+                if (!CompanyDataHelper.belongsToCurrentCompany(this@UnpaidPackageActivationActivity, doc)) return@forEach
                 val provider = (doc.getString("ispProvider") ?: "")
                     .trim().uppercase(Locale.getDefault())
                 if (provider == wantedCompany || provider.isBlank() && wantedCompany == "EBONE") {
@@ -617,6 +622,7 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
             }
 
             masterSnapshot?.documents?.forEach { doc ->
+                if (!CompanyDataHelper.belongsToCurrentCompany(this@UnpaidPackageActivationActivity, doc)) return@forEach
                 val provider = getMasterCompany(doc)
                 if (provider == wantedCompany || provider.isBlank() && wantedCompany == "EBONE") {
                     masterUsers.add(doc)
@@ -1080,12 +1086,14 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
                             doc?.getString("ispProvider")
                                 ?: spinnerCompany.selectedItem?.toString()
                                 ?: "EBONE"
+                        val currentCompId = CompanyDataHelper.getCurrentCompanyId(this) ?: loggedCompany
                         ReliefLogRepository.logActivation(
                             customerId = customerId,
                             company = loggedCompany,
                             reliefDays = selectedReliefDays,
                             expectedExpiryAt = selectedSuspendAt,
-                            isTest = isQuickTestPending
+                            isTest = isQuickTestPending,
+                            companyId = currentCompId
                         )
 
                         Toast.makeText(

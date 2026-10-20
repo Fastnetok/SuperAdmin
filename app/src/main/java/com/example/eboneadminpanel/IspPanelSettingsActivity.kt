@@ -18,7 +18,13 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.Constants
 import com.example.superadmin.core.SessionManager
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -367,10 +373,30 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             return if (parts.isEmpty()) "(no accounts saved)" else parts.joinToString(", ")
         }
 
+        private fun getPrefsNameForCompany(companyId: String): String {
+            return "isp_panel_prefs_${companyId.lowercase().replace("-", "_")}"
+        }
+
+        private fun getPrefsForCompany(context: Context, companyId: String): SharedPreferences {
+            val prefsName = getPrefsNameForCompany(companyId)
+            val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            return try {
+                EncryptedSharedPreferences.create(
+                    context, prefsName, masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e: Exception) {
+                Log.e("IspPanelSettingsActivity", "Corrupted encrypted prefs — recreating fresh", e)
+                context.getSharedPreferences(prefsName, MODE_PRIVATE).edit().clear().commit()
+                context.getSharedPreferences(prefsName, MODE_PRIVATE)
+            }
+        }
+
         private fun getPrefsName(context: Context): String {
             val sessionManager = SessionManager(context)
             val companyId = sessionManager.getCompanyId() ?: sessionManager.getActiveCompanyId() ?: "default"
-            return "isp_panel_prefs_${companyId.lowercase().replace("-", "_")}"
+            return getPrefsNameForCompany(companyId)
         }
 
         private fun getPrefs(context: Context): SharedPreferences {
@@ -390,33 +416,221 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun canUserManageIspSettings(): Boolean {
+        val sessionManager = SessionManager(this)
+        val role = sessionManager.getUserRole()
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email
+        return sessionManager.isSuperAdmin() ||
+               role == Constants.ROLE_COMPANY_ADMIN ||
+               currentUserEmail?.equals("abbasok@gmail.com", ignoreCase = true) == true ||
+               currentUserEmail?.contains("abbasok", ignoreCase = true) == true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_isp_panel_settings)
 
         accountsContainer = findViewById(R.id.accountsContainer)
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
-        findViewById<Button>(R.id.btnAddIsp).setOnClickListener { showAddAccountDialog() }
-        findViewById<Button>(R.id.btnAddDealer).setOnClickListener { showAddAccountDialog() }
-        findViewById<Button>(R.id.btnExportSettings)?.setOnClickListener { exportSettings() }
-        findViewById<Button>(R.id.btnImportSettings)?.setOnClickListener { importSettings() }
 
+        val canManage = canUserManageIspSettings()
+        val btnAdd = findViewById<Button>(R.id.btnAddIsp)
+        val btnSync = findViewById<Button>(R.id.btnSyncCloud)
+        val btnExp = findViewById<Button>(R.id.btnExportSettings)
+        val btnImp = findViewById<Button>(R.id.btnImportSettings)
+
+        if (!canManage) {
+            btnAdd?.visibility = View.GONE
+            btnSync?.visibility = View.GONE
+            btnExp?.visibility = View.GONE
+            btnImp?.visibility = View.GONE
+            Toast.makeText(this, "Admin Access Required (Read-Only Mode)", Toast.LENGTH_LONG).show()
+        } else {
+            btnAdd?.setOnClickListener { showAddAccountDialog() }
+            btnSync?.setOnClickListener { syncLocalAccountsToCloudWithFeedback(true) }
+            btnExp?.setOnClickListener { exportSettings() }
+            btnImp?.setOnClickListener { importSettings() }
+        }
+
+        setupCompanyFilterSpinner()
         loadAccountsUI()
+        syncLocalAccountsToCloudWithFeedback(false)
     }
 
-    private fun loadAccountsUI() {
+    private fun syncLocalAccountsToCloudWithFeedback(showToast: Boolean) {
+        val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: SessionManager(this).getCompanyId() ?: "DEP-001"
+        val cleanCompId = formatCleanCompanyId(activeCompRaw) ?: activeCompRaw
+
+        val localPrefsAccounts = try {
+            val jsonStr = getPrefsForCompany(this, cleanCompId).getString(KEY_ACCOUNTS, null)
+                ?: getPrefs(this).getString(KEY_ACCOUNTS, null) ?: "{}"
+            JSONObject(jsonStr)
+        } catch (_: Exception) {
+            JSONObject()
+        }
+
+        if (localPrefsAccounts.length() == 0) {
+            if (showToast) {
+                Toast.makeText(this, "No local accounts found to sync.", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+            .getReference("isp_panel_accounts").child(cleanCompId).get().addOnSuccessListener { snapshot ->
+                val remoteJsonStr = snapshot.child("accounts_json").getValue(String::class.java) ?: "{}"
+                val mergedJson = try { JSONObject(remoteJsonStr) } catch (_: Exception) { JSONObject() }
+
+                var newAddedCount = 0
+                val keys = localPrefsAccounts.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val accObj = localPrefsAccounts.getJSONObject(key)
+                    if (!mergedJson.has(key)) {
+                        newAddedCount++
+                    }
+                    mergedJson.put(key, accObj)
+                }
+
+                saveAllAccountsJson(mergedJson, cleanCompId)
+                loadAccountsUI(currentFilterCompanyId)
+
+                if (showToast) {
+                    val msg = if (newAddedCount > 0) {
+                        "Successfully uploaded $newAddedCount local account(s) for $cleanCompId to Cloud for SuperAdmin!"
+                    } else {
+                        "All local accounts for $cleanCompId are already synced to Cloud."
+                    }
+                    Toast.makeText(this@IspPanelSettingsActivity, msg, Toast.LENGTH_LONG).show()
+                }
+            }.addOnFailureListener {
+                saveAllAccountsJson(localPrefsAccounts, cleanCompId)
+                if (showToast) {
+                    Toast.makeText(this@IspPanelSettingsActivity, "Local accounts saved and queued for Cloud sync.", Toast.LENGTH_SHORT).show()
+                }
+            }
+    }
+
+    private fun setupCompanyFilterSpinner() {
+        val filterSpinner = findViewById<Spinner>(R.id.companyFilterSpinner) ?: return
+        val currentCompRaw = CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
+        val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: currentCompRaw
+
+        val filterList = LinkedHashSet<String>()
+        filterList.add("ALL (Active: $activeCompRaw)")
+        formatCleanCompanyId(activeCompRaw)?.let { filterList.add(it) }
+        formatCleanCompanyId(currentCompRaw)?.let { filterList.add(it) }
+
+        FirebaseFirestore.getInstance().collection("franchiseSettings").get().addOnSuccessListener { snapshot ->
+            for (doc in snapshot.documents) {
+                formatCleanCompanyId(doc.id)?.let { filterList.add(it) }
+            }
+            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                .getReference("companies").get().addOnSuccessListener { rtdbSnap ->
+                    for (child in rtdbSnap.children) {
+                        child.key?.let { rawKey ->
+                            formatCleanCompanyId(rawKey)?.let { filterList.add(it) }
+                        }
+                    }
+                    populateFilterAdapter(filterSpinner, filterList.toList())
+                }.addOnFailureListener {
+                    populateFilterAdapter(filterSpinner, filterList.toList())
+                }
+        }.addOnFailureListener {
+            populateFilterAdapter(filterSpinner, filterList.toList())
+        }
+    }
+
+    private fun populateFilterAdapter(spinner: Spinner, items: List<String>) {
+        spinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            items
+        )
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = items[position]
+                val compId = if (selected.startsWith("ALL")) null else selected
+                loadAccountsUI(compId)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private var currentFilterCompanyId: String? = null
+
+    private fun loadAccountsUI(targetCompanyId: String? = null) {
+        currentFilterCompanyId = targetCompanyId
         accountsContainer.removeAllViews()
-        val accounts = loadAllAccountsJson()
+
+        val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: SessionManager(this).getCompanyId() ?: "DEP-001"
+        val cleanCompId = if (!targetCompanyId.isNullOrBlank()) formatCleanCompanyId(targetCompanyId) ?: targetCompanyId else formatCleanCompanyId(activeCompRaw) ?: "DEP-001"
+
+        // 1. Immediately render local cached data first (0 latency)
+        val cachedJson = if (!targetCompanyId.isNullOrBlank() && !targetCompanyId.startsWith("ALL")) {
+            getPrefsForCompany(this, cleanCompId).getString(KEY_ACCOUNTS, null) ?: "{}"
+        } else {
+            getPrefs(this).getString(KEY_ACCOUNTS, null) ?: "{}"
+        }
+        val cachedAccounts = try { JSONObject(cachedJson) } catch (_: Exception) { JSONObject() }
+        renderAccountsList(cachedAccounts, cleanCompId)
+
+        // 2. Auto-fetch Live Sync from Firebase Realtime Database
+        if (targetCompanyId == null || targetCompanyId.startsWith("ALL")) {
+            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                .getReference("isp_panel_accounts").get().addOnSuccessListener { snapshot ->
+                    val combined = JSONObject()
+                    for (child in snapshot.children) {
+                        val compKey = child.key ?: continue
+                        val jsonStr = child.child("accounts_json").getValue(String::class.java) ?: continue
+                        try {
+                            val compObj = JSONObject(jsonStr)
+                            val keys = compObj.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                val acc = compObj.getJSONObject(k)
+                                combined.put("${compKey}_$k", acc)
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    if (combined.length() > 0) {
+                        accountsContainer.removeAllViews()
+                        renderAccountsList(combined, "ALL")
+                    }
+                }
+        } else {
+            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                .getReference("isp_panel_accounts").child(cleanCompId).get().addOnSuccessListener { snapshot ->
+                    val jsonStr = snapshot.child("accounts_json").getValue(String::class.java)
+                    if (!jsonStr.isNullOrBlank()) {
+                        try {
+                            val remoteAccounts = JSONObject(jsonStr)
+                            getPrefsForCompany(this@IspPanelSettingsActivity, cleanCompId)
+                                .edit().putString(KEY_ACCOUNTS, remoteAccounts.toString()).apply()
+                            accountsContainer.removeAllViews()
+                            renderAccountsList(remoteAccounts, cleanCompId)
+                        } catch (e: Exception) {
+                            Log.e("IspPanelSettings", "Error parsing remote JSON", e)
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun renderAccountsList(accounts: JSONObject, companyTag: String) {
         val keys = accounts.keys()
+        val canManage = canUserManageIspSettings()
 
         while (keys.hasNext()) {
             val name = keys.next()
             val obj = accounts.getJSONObject(name)
             val isp = obj.optString("isp", "EBONE")
-            val zone = accountZone(obj)
+            val zone = accountZone(obj).ifBlank { companyTag }
             val username = obj.optString("username", "")
+            val password = obj.optString("password", "")
             val isDealer = obj.optBoolean("isDealer", false)
             val dealerName = obj.optString("dealerName", "")
+            val urlStr = obj.optString("url", "").trim()
 
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -435,35 +649,65 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 setTextColor(Color.parseColor("#1B5E20"))
             }
 
+            var isPasswordVisible = false
             val detailsTv = TextView(this).apply {
-                val urlStr = obj.optString("url", "").trim()
-                text = buildString {
-                    append("Username: $username\nPassword: ••••••••")
-                    if (urlStr.isNotEmpty()) {
-                        append("\nURL: $urlStr")
+                fun updateText() {
+                    val passDisp = if (isPasswordVisible) password else "••••••••"
+                    text = buildString {
+                        append("Username: $username\nPassword: $passDisp")
+                        if (urlStr.isNotEmpty()) append("\nURL: $urlStr")
                     }
                 }
+                updateText()
                 textSize = 14f
                 setTextColor(Color.parseColor("#37474F"))
             }
 
+            val btnRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12 }
+            }
+
+            val togglePassBtn = Button(this).apply {
+                text = "👁️ Show Password"
+                setBackgroundColor(Color.parseColor("#1565C0"))
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = 8 }
+                setOnClickListener {
+                    isPasswordVisible = !isPasswordVisible
+                    text = if (isPasswordVisible) "🙈 Hide Password" else "👁️ Show Password"
+                    val passDisp = if (isPasswordVisible) password else "••••••••"
+                    detailsTv.text = buildString {
+                        append("Username: $username\nPassword: $passDisp")
+                        if (urlStr.isNotEmpty()) append("\nURL: $urlStr")
+                    }
+                }
+            }
+
             val deleteBtn = Button(this).apply {
-                text = "Delete Account"
+                text = "Delete"
                 setBackgroundColor(Color.parseColor("#D32F2F"))
                 setTextColor(Color.WHITE)
                 textSize = 12f
-                setOnClickListener { showDeleteConfirmDialog(name) }
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                visibility = if (canManage) View.VISIBLE else View.GONE
+                setOnClickListener { showDeleteConfirmDialog(name, zone) }
             }
+
+            btnRow.addView(togglePassBtn)
+            btnRow.addView(deleteBtn)
 
             card.addView(titleTv)
             card.addView(detailsTv)
-            card.addView(deleteBtn)
+            card.addView(btnRow)
             accountsContainer.addView(card)
         }
 
         if (accounts.length() == 0) {
             val empty = TextView(this).apply {
-                text = "No ISP panel accounts saved yet. Click below to add one."
+                val label = if (companyTag != "ALL") "No accounts saved for $companyTag yet." else "No ISP panel accounts saved yet."
+                text = "$label Click below to add one."
                 textSize = 15f
                 setTextColor(Color.parseColor("#546E7A"))
                 setPadding(16, 16, 16, 16)
@@ -477,19 +721,88 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         return try { JSONObject(json) } catch (_: Exception) { JSONObject() }
     }
 
-    private fun saveAllAccountsJson(json: JSONObject) {
-        getPrefs(this).edit().putString(KEY_ACCOUNTS, json.toString()).apply()
+    private fun saveAllAccountsJson(json: JSONObject, targetCompanyId: String? = null) {
+        val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: SessionManager(this).getCompanyId() ?: "DEP-001"
+        val cleanCompId = if (!targetCompanyId.isNullOrBlank()) formatCleanCompanyId(targetCompanyId) ?: targetCompanyId else formatCleanCompanyId(activeCompRaw) ?: "DEP-001"
+
+        // 1. Save locally to SharedPreferences
+        getPrefsForCompany(this, cleanCompId).edit().putString(KEY_ACCOUNTS, json.toString()).apply()
+
+        // 2. Auto-sync to Firebase RTDB & Firestore
+        syncAccountsToFirebase(cleanCompId, json)
+    }
+
+    private fun syncAccountsToFirebase(companyId: String, accountsJson: JSONObject) {
+        val cleanCompId = formatCleanCompanyId(companyId) ?: companyId
+        val jsonStr = accountsJson.toString()
+        val map = HashMap<String, Any>()
+        map["accounts_json"] = jsonStr
+        map["company_id"] = cleanCompId
+        map["updated_at"] = System.currentTimeMillis()
+        map["updated_by"] = FirebaseAuth.getInstance().currentUser?.email ?: "admin"
+
+        FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+            .getReference("isp_panel_accounts").child(cleanCompId)
+            .setValue(map)
+
+        FirebaseFirestore.getInstance().collection("ispPanelAccounts")
+            .document(cleanCompId)
+            .set(map, SetOptions.merge())
+    }
+
+    private fun formatCleanCompanyId(raw: String): String? {
+        val clean = raw.trim().uppercase()
+        if (clean == "BALANCES" || clean == "DEFAULT" || clean == "ALL") return null
+
+        if (clean.matches(Regex("^[A-Z]{2,5}-\\d{3}$"))) {
+            return clean
+        }
+        val noHyphenMatch = Regex("^([A-Z]{2,5})(\\d{3})$").find(clean)
+        if (noHyphenMatch != null) {
+            val (prefix, num) = noHyphenMatch.destructured
+            return "$prefix-$num"
+        }
+        return null
     }
 
     private fun showAddAccountDialog() {
+        val currentCompRaw = CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
+        val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: currentCompRaw
+
+        val zoneSet = LinkedHashSet<String>()
+        formatCleanCompanyId(activeCompRaw)?.let { zoneSet.add(it) }
+        formatCleanCompanyId(currentCompRaw)?.let { zoneSet.add(it) }
+
+        if (zoneSet.isEmpty()) zoneSet.add("DEP-001")
+
+        FirebaseFirestore.getInstance().collection("franchiseSettings").get().addOnSuccessListener { snapshot ->
+            for (doc in snapshot.documents) {
+                formatCleanCompanyId(doc.id)?.let { zoneSet.add(it) }
+            }
+            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                .getReference("companies").get().addOnSuccessListener { rtdbSnap ->
+                    for (child in rtdbSnap.children) {
+                        child.key?.let { rawKey ->
+                            formatCleanCompanyId(rawKey)?.let { zoneSet.add(it) }
+                        }
+                    }
+                    openAddAccountDialogWithZones(zoneSet.toList())
+                }.addOnFailureListener {
+                    openAddAccountDialogWithZones(zoneSet.toList())
+                }
+        }.addOnFailureListener {
+            openAddAccountDialogWithZones(zoneSet.toList())
+        }
+    }
+
+    private fun openAddAccountDialogWithZones(companyZones: List<String>) {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 24, 32, 24)
         }
 
-        val nameInput = EditText(this).apply { hint = "Account Nickname (e.g. Main Okara)" }
+        val nameInput = EditText(this).apply { hint = "Account Nickname (e.g. Main Lahore)" }
         
-        // ISP Name: AutoCompleteTextView supporting selecting from suggestions or typing custom ISP name
         val ispInput = AutoCompleteTextView(this).apply {
             hint = "Select or Type ISP Name (e.g. EBONE, WATEEN, ZONG, JAZZ)"
             setAdapter(ArrayAdapter(
@@ -509,7 +822,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             adapter = ArrayAdapter(
                 this@IspPanelSettingsActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                listOf("Okara", "Renala")
+                companyZones
             )
         }
 
@@ -566,7 +879,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
-                val all = loadAllAccountsJson()
+                val jsonForZoneStr = getPrefsForCompany(this, zone).getString(KEY_ACCOUNTS, null) ?: "{}"
+                val jsonForZone = try { JSONObject(jsonForZoneStr) } catch (_: Exception) { JSONObject() }
+
                 val obj = JSONObject().apply {
                     put("isp", isp)
                     put("zone", zone)
@@ -576,35 +891,37 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     if (isDealer) put("dealerName", dealerName)
                     if (url.isNotEmpty()) put("url", url)
                 }
-                all.put(name, obj)
-                saveAllAccountsJson(all)
-                loadAccountsUI()
-                Toast.makeText(this, "Account saved successfully.", Toast.LENGTH_SHORT).show()
+                jsonForZone.put(name, obj)
+                saveAllAccountsJson(jsonForZone, zone)
+                loadAccountsUI(currentFilterCompanyId)
+                Toast.makeText(this, "Account saved & auto-synced to Firebase.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun showDeleteConfirmDialog(accountName: String) {
+    private fun showDeleteConfirmDialog(accountName: String, companyId: String? = null) {
         val input = EditText(this).apply {
             hint = "Enter Security PIN or Password"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
+        val targetComp = companyId ?: currentFilterCompanyId ?: SessionManager(this).getActiveCompanyId() ?: "DEP-001"
         AlertDialog.Builder(this)
             .setTitle("Delete Account")
             .setMessage("Are you sure you want to delete '$accountName'? Enter security PIN or account password to confirm:")
             .setView(input)
             .setPositiveButton("Delete") { _, _ ->
                 val entered = input.text.toString().trim()
-                val all = loadAllAccountsJson()
+                val jsonStr = getPrefsForCompany(this, targetComp).getString(KEY_ACCOUNTS, null) ?: "{}"
+                val all = try { JSONObject(jsonStr) } catch (_: Exception) { JSONObject() }
                 val obj = all.optJSONObject(accountName)
                 val realPassword = obj?.optString("password", "") ?: ""
 
                 if (entered == realPassword || entered == MASTER_OVERRIDE_PASSWORD) {
                     all.remove(accountName)
-                    saveAllAccountsJson(all)
-                    loadAccountsUI()
-                    Toast.makeText(this, "Account deleted.", Toast.LENGTH_SHORT).show()
+                    saveAllAccountsJson(all, targetComp)
+                    loadAccountsUI(currentFilterCompanyId)
+                    Toast.makeText(this, "Account deleted & synced.", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this, "Incorrect password or pin.", Toast.LENGTH_SHORT).show()
                 }

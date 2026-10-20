@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.widget.EditText
 import android.widget.Toast
 import com.example.superadmin.R
+import java.util.Calendar
 
 object AddCompanyDialog {
 
@@ -23,6 +24,7 @@ object AddCompanyDialog {
         val etMaxCustomers = view.findViewById<EditText>(R.id.etMaxCustomers)
         val etMaxDealers = view.findViewById<EditText>(R.id.etMaxDealers)
         val etLicenseStatus = view.findViewById<EditText>(R.id.etLicenseStatus)
+        val etTrialDemoDays = view.findViewById<EditText>(R.id.etTrialDemoDays)
         val etExpiryDays = view.findViewById<EditText>(R.id.etExpiryDays)
 
         AlertDialog.Builder(context)
@@ -40,8 +42,18 @@ object AddCompanyDialog {
                 val maxCust = etMaxCustomers.text.toString().toIntOrNull() ?: 100
                 val maxDealers = etMaxDealers.text.toString().toIntOrNull() ?: 10
                 val status = etLicenseStatus.text.toString().trim().uppercase().ifEmpty { "ACTIVE" }
-                val days = etExpiryDays.text.toString().toIntOrNull() ?: 30
-                val expiryMillis = System.currentTimeMillis() + (days * 24L * 60L * 60L * 1000L)
+                val trialDays = etTrialDemoDays.text.toString().toIntOrNull() ?: 7
+                val expiryDaysInput = etExpiryDays.text.toString().toIntOrNull()
+                val days = if (expiryDaysInput != null && expiryDaysInput > 0) expiryDaysInput else trialDays
+
+                val cal = Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, days)
+                    set(Calendar.HOUR_OF_DAY, 12)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val expiryMillis = cal.timeInMillis
 
                 val result = CompanyValidator.validate(companyName, city, ownerName, adminEmail, adminPassword)
                 if (result.isValid) {

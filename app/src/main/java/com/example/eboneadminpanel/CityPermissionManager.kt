@@ -16,9 +16,9 @@ object CityPermissionManager {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     }
 
-    private fun normalizeZone(zone: String): String {
-        val clean = zone.trim().uppercase()
-        return clean.split("-", "_", " ").firstOrNull() ?: clean
+    fun clearCache(context: Context) {
+        getCachePrefs(context).edit().clear().apply()
+        Log.d(TAG, "City permissions cache completely cleared.")
     }
 
     fun isCompanyEnabled(context: Context, zone: String, companyName: String, callback: (Boolean) -> Unit) {
@@ -28,15 +28,13 @@ object CityPermissionManager {
         val prefs = getCachePrefs(context)
         val cacheKey = "${targetZone}_company_$companyName"
 
-        // 1. Instant Cache Return (Zero Flash / Zero Delay)
         val cachedValue = if (prefs.contains(cacheKey)) {
-            prefs.getBoolean(cacheKey, true)
+            prefs.getBoolean(cacheKey, false)
         } else {
-            true
+            false
         }
         callback(cachedValue)
 
-        // 2. Background Firestore Sync
         checkPermission(context, zone, companyName, true) { isEnabled ->
             if (cachedValue != isEnabled) {
                 prefs.edit().putBoolean(cacheKey, isEnabled).apply()
@@ -54,15 +52,19 @@ object CityPermissionManager {
         val prefs = getCachePrefs(context)
         val cacheKey = "${targetZone}_feature_$featureName"
 
-        // 1. Instant Cache Return (Zero Flash / Zero Delay)
+        val defaultVal = when (featureName.trim().lowercase()) {
+            "movement tracking", "auto complaint monitor", "dealer webview" -> false
+            "dealer panel" -> true
+            else -> true
+        }
+
         val cachedValue = if (prefs.contains(cacheKey)) {
-            prefs.getBoolean(cacheKey, true)
+            prefs.getBoolean(cacheKey, defaultVal)
         } else {
-            true
+            defaultVal
         }
         callback(cachedValue)
 
-        // 2. Background Firestore Sync
         checkPermission(context, zone, featureName, false) { isEnabled ->
             if (cachedValue != isEnabled) {
                 prefs.edit().putBoolean(cacheKey, isEnabled).apply()
@@ -89,7 +91,7 @@ object CityPermissionManager {
                     checkedCount++
                     if (checkedCount == all.size) {
                         val sorted = all.filter { enabledList.contains(it) }
-                        callback(if (sorted.isEmpty()) all else sorted)
+                        callback(sorted)
                     }
                 }
             }
@@ -109,64 +111,56 @@ object CityPermissionManager {
         val rawZone = if (zone.isNotBlank() && zone.uppercase() != "ALL") zone else (sessionActive ?: sessionCompany ?: "OKARA")
 
         val targetZone = rawZone.trim().uppercase()
-        val baseZone = normalizeZone(targetZone)
-        Log.d(TAG, "checkPermission [isCompany=$isCompany, name=$name] inputZone='$zone' -> targetZone='$targetZone', baseZone='$baseZone'")
+        val canonicalDocId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(targetZone)
+        Log.d(TAG, "checkPermission [isCompany=$isCompany, name=$name] targetZone='$targetZone', canonicalDocId='$canonicalDocId'")
 
         val db = FirebaseFirestore.getInstance()
 
-        db.collection("franchiseSettings").get()
-            .addOnSuccessListener { querySnapshot ->
-                val docs = querySnapshot.documents
-
-                // Priority 1: Exact id or cityName == targetZone
-                var matchingDoc = docs.find { doc ->
-                    val docId = doc.id.trim().uppercase()
-                    val docCity = doc.getString("cityName")?.trim()?.uppercase().orEmpty()
-                    docId == targetZone || docCity == targetZone
-                }
-
-                // Priority 2: Exact id or cityName == baseZone
-                if (matchingDoc == null) {
-                    matchingDoc = docs.find { doc ->
-                        val docId = doc.id.trim().uppercase()
-                        val docCity = doc.getString("cityName")?.trim()?.uppercase().orEmpty()
-                        docId == baseZone || docCity == baseZone
-                    }
-                }
-
-                // Priority 3: Starts with baseZone or targetZone
-                if (matchingDoc == null) {
-                    matchingDoc = docs.find { doc ->
-                        val docId = doc.id.trim().uppercase()
-                        val docCity = doc.getString("cityName")?.trim()?.uppercase().orEmpty()
-                        docId.startsWith(baseZone) || baseZone.startsWith(docId) ||
-                        docCity.startsWith(baseZone) || baseZone.startsWith(docCity) ||
-                        docId.startsWith(targetZone) || targetZone.startsWith(docId)
-                    }
-                }
-
-                // Priority 4: Contains baseZone or targetZone
-                if (matchingDoc == null) {
-                    matchingDoc = docs.find { doc ->
-                        val docId = doc.id.trim().uppercase()
-                        val docCity = doc.getString("cityName")?.trim()?.uppercase().orEmpty()
-                        docId.contains(baseZone) || baseZone.contains(docId) ||
-                        docId.contains(targetZone) || targetZone.contains(docId) ||
-                        docCity.contains(baseZone) || baseZone.contains(docCity)
-                    }
-                }
-
-                if (matchingDoc != null && matchingDoc.exists()) {
-                    Log.d(TAG, "Found matching franchiseSettings doc (Priority search): ${matchingDoc.id} (cityName: ${matchingDoc.getString("cityName")})")
-                    parseSnapshot(matchingDoc, name, isCompany, callback)
+        db.collection("franchiseSettings").document(canonicalDocId).get()
+            .addOnSuccessListener { doc ->
+                if (doc.exists()) {
+                    Log.d(TAG, "Found exact franchiseSettings doc: ${doc.id}")
+                    parseSnapshot(doc, name, isCompany, callback)
                 } else {
-                    Log.w(TAG, "No matching franchiseSettings doc found for zone '$targetZone' / base '$baseZone'. Defaulting to true.")
-                    callback(true)
+                    db.collection("franchiseSettings").get().addOnSuccessListener { querySnapshot ->
+                        val matchingDoc = querySnapshot.documents.find { d ->
+                            val dId = d.id.trim().uppercase()
+                            val dCity = d.getString("cityName")?.trim()?.uppercase().orEmpty()
+                            dId == targetZone || dCity == targetZone ||
+                            com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(dId) == canonicalDocId ||
+                            com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(dCity) == canonicalDocId
+                        }
+                        if (matchingDoc != null && matchingDoc.exists()) {
+                            Log.d(TAG, "Found matching franchiseSettings doc: ${matchingDoc.id}")
+                            parseSnapshot(matchingDoc, name, isCompany, callback)
+                        } else {
+                            Log.w(TAG, "No matching franchiseSettings doc found for '$targetZone'. Defaulting.")
+                            val defaultVal = if (isCompany) false else when (name.trim().lowercase()) {
+                                "movement tracking", "auto complaint monitor", "dealer webview" -> false
+                                "dealer panel" -> true
+                                else -> true
+                            }
+                            callback(defaultVal)
+                        }
+                    }.addOnFailureListener { e ->
+                        Log.e(TAG, "Error fetching franchiseSettings collection", e)
+                        val defaultVal = if (isCompany) false else when (name.trim().lowercase()) {
+                            "movement tracking", "auto complaint monitor", "dealer webview" -> false
+                            "dealer panel" -> true
+                            else -> true
+                        }
+                        callback(defaultVal)
+                    }
                 }
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "Error fetching franchiseSettings collection", e)
-                callback(true)
+                Log.e(TAG, "Error fetching document '$canonicalDocId'", e)
+                val defaultVal = if (isCompany) false else when (name.trim().lowercase()) {
+                    "movement tracking", "auto complaint monitor", "dealer webview" -> false
+                    "dealer panel" -> true
+                    else -> true
+                }
+                callback(defaultVal)
             }
     }
 
@@ -190,15 +184,8 @@ object CityPermissionManager {
                     }
                 }
             }
-            val legacyKey = "${name.lowercase()}Enabled"
-            if (snapshot.contains(legacyKey)) {
-                val legacyStatus = snapshot.getBoolean(legacyKey) ?: true
-                Log.d(TAG, "Found legacy company key '$legacyKey' with status: $legacyStatus")
-                callback(legacyStatus)
-            } else {
-                Log.d(TAG, "Company '$name' not found in map or legacy keys. Defaulting to true.")
-                callback(true)
-            }
+            Log.d(TAG, "Company '$name' not found in map. Defaulting to FALSE.")
+            callback(false)
         } else {
             val featuresMap = snapshot.get("enabledFeatures") as? Map<*, *>
             Log.d(TAG, "parseSnapshot [Feature=$name] enabledFeatures map: $featuresMap")
@@ -213,8 +200,13 @@ object CityPermissionManager {
                     }
                 }
             }
-            Log.d(TAG, "Feature '$name' not found in enabledFeatures map. Defaulting to true.")
-            callback(true)
+            val defaultVal = when (name.trim().lowercase()) {
+                "movement tracking", "auto complaint monitor", "dealer webview" -> false
+                "dealer panel" -> true
+                else -> true
+            }
+            Log.d(TAG, "Feature '$name' not found in enabledFeatures map. Defaulting to $defaultVal.")
+            callback(defaultVal)
         }
     }
 }

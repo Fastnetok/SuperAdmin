@@ -15,7 +15,7 @@
             android:layout_height="100dp"
             android:background="#0D47A1"
             android:gravity="center"
-            android:paddingTop="14dp"
+            android:paddingTop="26dp"
             android:text="SUPERADMIN MENU"
             android:textColor="#FFFFFF"
             android:textSize="22sp"
@@ -24,10 +24,14 @@
         <TextView
             android:id="@+id/menuManageCompanies"
             android:layout_width="match_parent"
-            android:layout_height="46dp"
+            android:layout_height="wrap_content"
+            android:minHeight="44dp"
             android:background="#E3F2FD"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
             android:text="🏢 SuperAdmin: Manage Companies"
             android:textColor="#0D47A1"
             android:textSize="16sp"
@@ -36,10 +40,14 @@
         <TextView
             android:id="@+id/menuCityManagement"
             android:layout_width="match_parent"
-            android:layout_height="46dp"
+            android:layout_height="wrap_content"
+            android:minHeight="44dp"
             android:background="#E0F2F1"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
             android:text="🏙️ City &amp; Franchise Management"
             android:textColor="#00695C"
             android:textSize="16sp"
@@ -48,144 +56,235 @@
         <TextView
             android:id="@+id/menuAddComplaint"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="New Complaint"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuBiometricAttendance"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Employee Biometric Attendance"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuOfficeTimings"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Office Timings"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuAppVersion"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="App Version Status"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuAddEmployee"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Admin Management"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuAllEmployees"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="All Employees"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuReports"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Reports"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuMovementTracking"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Movement Tracking"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuCustomerBilling"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Customer Billing"
             android:textSize="16sp" />
 
         <TextView
             android:id="@+id/menuAddCustomer"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Add Customer"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuIspPanelSettings"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="ISP Panel Settings"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuSmsMatchSettings"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="SMS Match Settings"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuDealerPanel"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Dealer Panel"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuAutoComplaintMonitor"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Auto Complaint Monitor"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuSettings"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Settings"
+            android:textSize="16sp"/>
+
+        <TextView
+            android:id="@+id/menuCompanyLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
+            android:text="Company Log"
+            android:textSize="16sp"/>
+
+        <TextView
+            android:id="@+id/menuAboutAppBuilder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
+            android:text="About"
             android:textSize="16sp"/>
 
         <TextView
             android:id="@+id/menuLogout"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="35dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="Logout"
             android:textColor="#B71C1C"
             android:textStyle="bold"

@@ -25,7 +25,6 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
     private lateinit var btnSavePermissions: Button
 
     private val db = FirebaseFirestore.getInstance()
-    private val defaultCities = mutableListOf("Okara", "Renala", "Depalpur", "Pakpattan", "Sahiwal", "Arifwala")
     private val cityList = mutableListOf<String>()
     private val companySwitches = mutableMapOf<String, Switch>()
     private val featureSwitches = mutableMapOf<String, Switch>()
@@ -179,31 +178,46 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
     }
 
     private fun setupCities() {
-        db.collection("franchiseSettings").get().addOnSuccessListener { snapshot ->
-            cityList.clear()
-            cityList.addAll(defaultCities)
-            for (doc in snapshot.documents) {
-                val id = doc.id
-                if (!cityList.any { it.equals(id, true) }) {
-                    cityList.add(id)
+        db.collection("companies").get().addOnSuccessListener { compSnapshot ->
+            val rawCompanyIds = mutableListOf<String>()
+            val displayList = mutableListOf<String>()
+
+            for (doc in compSnapshot.documents) {
+                val cId = doc.getString("companyId")?.trim() ?: doc.id.trim()
+                val ownerName = doc.getString("ownerName")?.trim() ?: doc.getString("companyName")?.trim() ?: ""
+                if (cId.isNotBlank()) {
+                    rawCompanyIds.add(cId)
+                    val label = if (ownerName.isNotBlank() && !ownerName.equals(cId, true)) "$cId (Owner: $ownerName)" else cId
+                    displayList.add(label)
                 }
             }
-            updateSpinner()
+
+            cityList.clear()
+            cityList.addAll(rawCompanyIds)
+
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, displayList).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            spinnerCities.adapter = adapter
+
+            if (rawCompanyIds.isNotEmpty()) {
+                if (!rawCompanyIds.contains(currentCity)) {
+                    currentCity = rawCompanyIds.first()
+                }
+                spinnerCities.setSelection(rawCompanyIds.indexOf(currentCity))
+            } else {
+                currentCity = ""
+                containerCompanySwitches.removeAllViews()
+                containerFeatureSwitches.removeAllViews()
+            }
         }.addOnFailureListener {
             cityList.clear()
-            cityList.addAll(defaultCities)
-            updateSpinner()
+            spinnerCities.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, emptyList<String>())
         }
     }
 
     private fun updateSpinner() {
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, cityList).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
-        spinnerCities.adapter = adapter
-        if (cityList.contains(currentCity)) {
-            spinnerCities.setSelection(cityList.indexOf(currentCity))
-        }
+        setupCities()
     }
 
     private fun setupListeners() {
@@ -216,9 +230,31 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
                     updateSpinner()
                     spinnerCities.setSelection(cityList.indexOf(capitalized))
                     inputNewCity.text.clear()
-                    Toast.makeText(this, "City added: $capitalized", Toast.LENGTH_SHORT).show()
+
+                    // Initialize company-wise permissions document in franchiseSettings strictly per-company
+                    val docId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(capitalized)
+                    val companiesMap = AppFeatures.ALL_COMPANIES.associateWith { false }
+                    val featuresMap = AppFeatures.ALL_FEATURES.associateWith { feat ->
+                        val clean = feat.trim().lowercase()
+                        if (clean.contains("movement tracking") || clean.contains("auto complaint") || clean.contains("webview")) {
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                    val data = mapOf(
+                        "enabledCompanies" to companiesMap,
+                        "enabledFeatures" to featuresMap,
+                        "cityName" to capitalized
+                    )
+                    db.collection("franchiseSettings").document(docId)
+                        .set(data, SetOptions.merge())
+                        .addOnSuccessListener {
+                            Toast.makeText(this, "Company-wise settings created for $capitalized", Toast.LENGTH_SHORT).show()
+                            loadCityPermissions(capitalized)
+                        }
                 } else {
-                    Toast.makeText(this, "City already exists", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "City/Company already exists", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -283,14 +319,16 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
     }
 
     private fun migrateCityInFirestore(oldCity: String, newCity: String) {
-        db.collection("franchiseSettings").document(oldCity.uppercase()).get()
+        val oldDocId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(oldCity)
+        val newDocId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(newCity)
+        db.collection("franchiseSettings").document(oldDocId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
                     val data = doc.data ?: emptyMap()
-                    db.collection("franchiseSettings").document(newCity.uppercase())
+                    db.collection("franchiseSettings").document(newDocId)
                         .set(data)
                         .addOnSuccessListener {
-                            db.collection("franchiseSettings").document(oldCity.uppercase()).delete()
+                            db.collection("franchiseSettings").document(oldDocId).delete()
                             Toast.makeText(this, "City updated from $oldCity to $newCity", Toast.LENGTH_SHORT).show()
                             loadCityPermissions(currentCity)
                         }
@@ -348,14 +386,14 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
     }
 
     private fun deleteCityFromFirestoreAndList(city: String) {
-        db.collection("franchiseSettings").document(city.uppercase()).delete()
+        val docId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(city)
+        db.collection("franchiseSettings").document(docId).delete()
             .addOnSuccessListener {
                 cityList.remove(city)
-                if (cityList.isEmpty()) {
-                    cityList.addAll(defaultCities)
-                }
-                currentCity = cityList.first()
+                currentCity = cityList.firstOrNull() ?: ""
                 updateSpinner()
+                containerCompanySwitches.removeAllViews()
+                containerFeatureSwitches.removeAllViews()
                 Toast.makeText(this, "City deleted: $city", Toast.LENGTH_SHORT).show()
             }
             .addOnFailureListener { e ->
@@ -369,14 +407,38 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
         companySwitches.clear()
         featureSwitches.clear()
 
-        db.collection("franchiseSettings").document(city.uppercase()).get()
+        val docId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(city)
+        db.collection("franchiseSettings").document(docId).get()
             .addOnSuccessListener { snapshot ->
+                if (!snapshot.exists()) {
+                    // Auto-initialize company-wise document if missing (default disabled for companies and sensitive features)
+                    val companiesMap = AppFeatures.ALL_COMPANIES.associateWith { false }
+                    val featuresMap = AppFeatures.ALL_FEATURES.associateWith { feat ->
+                        val clean = feat.trim().lowercase()
+                        if (clean.contains("movement tracking") || clean.contains("auto complaint") || clean.contains("webview")) {
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                    val data = mapOf(
+                        "enabledCompanies" to companiesMap,
+                        "enabledFeatures" to featuresMap,
+                        "cityName" to city
+                    )
+                    db.collection("franchiseSettings").document(docId).set(data, SetOptions.merge())
+                }
+
                 val enabledCompanies = snapshot.get("enabledCompanies") as? Map<*, *> ?: emptyMap<Any, Any>()
                 val enabledFeatures = snapshot.get("enabledFeatures") as? Map<*, *> ?: emptyMap<Any, Any>()
 
-                // Populate Companies
+                // Populate Companies (default to false)
                 for (company in AppFeatures.ALL_COMPANIES) {
-                    val isEnabled = (enabledCompanies[company] as? Boolean) ?: true
+                    val isEnabled = if (snapshot.exists() && enabledCompanies.containsKey(company)) {
+                        (enabledCompanies[company] as? Boolean) ?: false
+                    } else {
+                        false
+                    }
                     val sw = Switch(this).apply {
                         text = company
                         isChecked = isEnabled
@@ -388,7 +450,13 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
 
                 // Populate Features
                 for (feature in AppFeatures.ALL_FEATURES) {
-                    val isEnabled = (enabledFeatures[feature] as? Boolean) ?: true
+                    val clean = feature.trim().lowercase()
+                    val defaultVal = if (clean.contains("movement tracking") || clean.contains("auto complaint") || clean.contains("webview")) false else true
+                    val isEnabled = if (snapshot.exists() && enabledFeatures.containsKey(feature)) {
+                        (enabledFeatures[feature] as? Boolean) ?: defaultVal
+                    } else {
+                        defaultVal
+                    }
                     val sw = Switch(this).apply {
                         text = feature
                         isChecked = isEnabled
@@ -420,13 +488,22 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
             "cityName" to city
         )
 
-        db.collection("franchiseSettings").document(city.uppercase())
-            .set(data, SetOptions.merge())
-            .addOnSuccessListener {
-                Toast.makeText(this, "Permissions saved successfully for $city", Toast.LENGTH_SHORT).show()
-            }
-            .addOnFailureListener { e ->
-                Toast.makeText(this, "Error saving: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
+        val cleanId = city.trim().uppercase()
+        val noHyphenId = cleanId.replace("-", "")
+        val canonicalId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(cleanId)
+
+        val batch = db.batch()
+        batch.set(db.collection("franchiseSettings").document(cleanId), data, SetOptions.merge())
+        batch.set(db.collection("franchiseSettings").document(noHyphenId), data, SetOptions.merge())
+        if (canonicalId != cleanId && canonicalId != noHyphenId) {
+            batch.set(db.collection("franchiseSettings").document(canonicalId), data, SetOptions.merge())
+        }
+
+        batch.commit().addOnSuccessListener {
+            CityPermissionManager.clearCache(this)
+            Toast.makeText(this, "Permissions saved successfully for $city", Toast.LENGTH_SHORT).show()
+        }.addOnFailureListener { e ->
+            Toast.makeText(this, "Error saving: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 }

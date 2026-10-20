@@ -9,10 +9,12 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.superadmin.core.CompanyDataHelper
+import com.google.firebase.firestore.FirebaseFirestore
 
 /**
  * Handles background session "pokes" on app startup.
- * Staggers 4 panels to ensure cookies are fresh.
+ * Staggers enabled panels for active company to ensure cookies are fresh.
  */
 object StartupSessionManager {
     private const val TAG = "StartupSession"
@@ -21,40 +23,51 @@ object StartupSessionManager {
 
     fun startRefresh(context: Context) {
         Log.d(TAG, "Starting staggered session refresh...")
+        val currentCompany = CompanyDataHelper.getCurrentCompanyId(context) ?: "OKARA"
+        val canonicalDocId = CompanyDataHelper.getCanonicalDocId(currentCompany)
 
-        showProgressNotification(context, "Updating Panel Sessions...", "Ebill ریفریش ہو رہا ہے...")
+        val db = FirebaseFirestore.getInstance()
+        db.collection("franchiseSettings").document(canonicalDocId).get().addOnSuccessListener { snapshot ->
+            val enabledCompanies = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneEnabled = enabledCompanies?.get("EBONE") as? Boolean ?: true
+            val wateenEnabled = enabledCompanies?.get("WATEEN") as? Boolean ?: false
+            val zongEnabled = enabledCompanies?.get("ZONG") as? Boolean ?: false
 
-        val handler = Handler(Looper.getMainLooper())
-
-        // 1. EBILL (Immediate)
-        BackgroundBalanceUpdater.checkBalance(context, "EBONE", "Okara") {
-            Log.d(TAG, "Ebill poke done")
-        }
-
-        // 2. WATEEN (After 5s)
-        handler.postDelayed({
-            updateNotification(context, "Updating Panel Sessions...", "Wateen ریفریش ہو رہا ہے...")
-            BackgroundBalanceUpdater.checkBalance(context, "WATEEN", "Okara") {
-                Log.d(TAG, "Wateen poke done")
+            val tasks = mutableListOf<Pair<String, String>>()
+            if (eboneEnabled) tasks.add("EBONE" to currentCompany)
+            if (wateenEnabled) tasks.add("WATEEN" to currentCompany)
+            if (zongEnabled) {
+                tasks.add("ZONG" to currentCompany)
+                if (canonicalDocId.equals("RENALA", true) || currentCompany.equals("RENALA", true)) {
+                    tasks.add("ZONG" to "Renala")
+                }
             }
-        }, 5000)
 
-        // 3. ZONG OKARA (After 10s)
-        handler.postDelayed({
-            updateNotification(context, "Updating Panel Sessions...", "Zong (Okara) ریفریش ہو رہا ہے...")
-            BackgroundBalanceUpdater.checkBalance(context, "ZONG", "Okara") {
-                Log.d(TAG, "Zong Okara poke done")
+            if (tasks.isEmpty()) {
+                Log.d(TAG, "No ISP enabled for company $currentCompany")
+                return@addOnSuccessListener
             }
-        }, 10000)
 
-        // 4. ZONG RENALA (After 15s)
-        handler.postDelayed({
-            updateNotification(context, "Updating Panel Sessions...", "Zong (Renala) ریفریش ہو رہا ہے...")
-            BackgroundBalanceUpdater.checkBalance(context, "ZONG", "Renala") {
-                Log.d(TAG, "Zong Renala poke done. All fresh!")
+            showProgressNotification(context, "Updating Panel Sessions...", "${tasks[0].first} ($currentCompany) ریفریش ہو رہا ہے...")
+            val handler = Handler(Looper.getMainLooper())
+
+            tasks.forEachIndexed { index, (isp, zone) ->
+                val delay = (index * 5000).toLong()
+                handler.postDelayed({
+                    updateNotification(context, "Updating Panel Sessions...", "$isp ($zone) ریفریش ہو رہا ہے...")
+                    BackgroundBalanceUpdater.checkBalance(context, isp, zone) {
+                        Log.d(TAG, "$isp ($zone) poke done")
+                        if (index == tasks.size - 1) {
+                            cancelNotification(context)
+                        }
+                    }
+                }, delay)
+            }
+        }.addOnFailureListener {
+            BackgroundBalanceUpdater.checkBalance(context, "EBONE", currentCompany) {
                 cancelNotification(context)
             }
-        }, 15000)
+        }
     }
 
     private fun showProgressNotification(context: Context, title: String, msg: String) {

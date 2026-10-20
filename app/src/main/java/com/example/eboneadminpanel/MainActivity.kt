@@ -7,10 +7,13 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Color
 import android.text.Html
 import android.text.InputType
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Button
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -53,10 +56,11 @@ class MainActivity : AppCompatActivity(),
     private val startupPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions.values.all { it }) {
+        if (permissions[Manifest.permission.RECEIVE_SMS] == true) {
             ContextCompat.startForegroundService(this, Intent(this, PaymentActivationService::class.java))
-        } else {
-            android.widget.Toast.makeText(this, "SMS aur Notification permission zaroori hai payment auto-activation ke liye", android.widget.Toast.LENGTH_LONG).show()
+        }
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
+            enableMyLocationOnMap()
         }
     }
 
@@ -65,16 +69,11 @@ class MainActivity : AppCompatActivity(),
             ActivityResultContracts.RequestMultiplePermissions()
         ) { permissions ->
             if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
-                if (::mMap.isInitialized) {
-                    try {
-                        mMap.isMyLocationEnabled = true
-                    } catch (_: SecurityException) {}
-                }
+                enableMyLocationOnMap()
             }
         }
 
     private lateinit var mMap: GoogleMap
-    private var hasCenteredCameraOnce = false
     private val employeeMarkers = HashMap<String, Marker>()
     private var followedEmployeeName: String? = null
 
@@ -109,7 +108,12 @@ class MainActivity : AppCompatActivity(),
         // before starting the payment listener service (was previously
         // requesting nothing for SMS, and requesting notification
         // separately/later in loadDashboardCounters()).
-        val neededPermissions = mutableListOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
+        val neededPermissions = mutableListOf(
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.READ_SMS,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -238,6 +242,19 @@ class MainActivity : AppCompatActivity(),
 
         mapFragment.getMapAsync(this)
 
+        val dashboardRadiusCycleButton = findViewById<Button>(R.id.dashboardRadiusCycleButton)
+        dashboardRadiusCycleButton.setOnClickListener {
+            toggleDashboardRadiusStep(dashboardRadiusCycleButton)
+        }
+        dashboardRadiusCycleButton.setOnLongClickListener {
+            dashboardRadiusStepIndex = dashboardRadiusSteps.indexOfFirst { it.first == 120000.0 }
+            if (dashboardRadiusStepIndex == -1) dashboardRadiusStepIndex = dashboardRadiusSteps.size - 1
+            val (meters, label) = dashboardRadiusSteps[dashboardRadiusStepIndex]
+            dashboardRadiusCycleButton.text = label
+            applyDashboardRadius(meters, label)
+            true
+        }
+
         loadDashboardCounters()
         setupNewConnectionBadge()
         setupCompanyFilter()
@@ -345,140 +362,349 @@ class MainActivity : AppCompatActivity(),
             }
     }
 
+    private var rootEmployeesSnapshot: DataSnapshot? = null
+    private var companiesSnapshotData: DataSnapshot? = null
+    private var approvedDevicesSnapshot: DataSnapshot? = null
     private var attendanceSnapshot: DataSnapshot? = null
-    private var employeesSnapshot: DataSnapshot? = null
-    private var attendanceListener: ValueEventListener? = null
-    private var employeesListener: ValueEventListener? = null
-    private var attendanceRef: com.google.firebase.database.DatabaseReference? = null
-    private var employeesRef: com.google.firebase.database.DatabaseReference? = null
+    private var trackingSnapshot: DataSnapshot? = null
+
+    private val listeners = mutableListOf<ValueEventListener>()
+    private val refs = mutableListOf<DatabaseReference>()
 
     private fun setupFirebaseListeners() {
-        if (attendanceListener != null && attendanceRef != null) {
-            attendanceRef?.removeEventListener(attendanceListener!!)
+        for (i in refs.indices) {
+            refs.getOrNull(i)?.removeEventListener(listeners.getOrNull(i) ?: continue)
         }
-        if (employeesListener != null && employeesRef != null) {
-            employeesRef?.removeEventListener(employeesListener!!)
-        }
+        refs.clear()
+        listeners.clear()
 
-        attendanceRef = CompanyDataHelper.getScopedDatabaseReference(this, "attendance")
-        attendanceListener = object : ValueEventListener {
+        val db = FirebaseDatabase.getInstance()
+
+        val attRef = db.getReference("attendance")
+        val attListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 attendanceSnapshot = snapshot
-                updateDashboardMap()
+                runOnUiThread { updateDashboardMap() }
             }
             override fun onCancelled(error: DatabaseError) {}
         }
-        attendanceRef?.addValueEventListener(attendanceListener!!)
+        attRef.addValueEventListener(attListener)
+        refs.add(attRef); listeners.add(attListener)
 
-        employeesRef = CompanyDataHelper.getScopedDatabaseReference(this, "employees")
-        employeesListener = object : ValueEventListener {
+        val empRef = db.getReference("employees")
+        val empListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                employeesSnapshot = snapshot
-                updateDashboardMap()
+                rootEmployeesSnapshot = snapshot
+                runOnUiThread { updateDashboardMap() }
             }
             override fun onCancelled(error: DatabaseError) {}
         }
-        employeesRef?.addValueEventListener(employeesListener!!)
+        empRef.addValueEventListener(empListener)
+        refs.add(empRef); listeners.add(empListener)
+
+        val compRef = db.getReference("companies")
+        val compListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                companiesSnapshotData = snapshot
+                runOnUiThread { updateDashboardMap() }
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        compRef.addValueEventListener(compListener)
+        refs.add(compRef); listeners.add(compListener)
+
+        val appRef = db.getReference("ApprovedDevices")
+        val appListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                approvedDevicesSnapshot = snapshot
+                runOnUiThread { updateDashboardMap() }
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        appRef.addValueEventListener(appListener)
+        refs.add(appRef); listeners.add(appListener)
+
+        val trackRef = db.getReference("tracking")
+        val trackListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trackingSnapshot = snapshot
+                runOnUiThread { updateDashboardMap() }
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        trackRef.addValueEventListener(trackListener)
+        refs.add(trackRef); listeners.add(trackListener)
     }
 
     private fun updateDashboardMap() {
         if (!::mMap.isInitialized) return
-        val attSnapshot = attendanceSnapshot ?: return
-        val empSnapshot = employeesSnapshot ?: return
+        val rootEmpSnap = rootEmployeesSnapshot
+        val compSnap = companiesSnapshotData
+        val appDevSnap = approvedDevicesSnapshot
+        val attSnapshot = attendanceSnapshot
+        val trackSnap = trackingSnapshot
 
         val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val onlineList = mutableListOf<String>()
-        val offlineList = mutableListOf<String>()
-        var firstLocation: LatLng? = null
 
-        val employeeDataMap = mutableMapOf<String, MutableList<DataSnapshot>>()
+        val onlineSet = mutableSetOf<String>()
+        val offlineSet = mutableSetOf<String>()
 
-        for (employee in empSnapshot.children) {
-            if (!CompanyDataHelper.belongsToCurrentCompany(this@MainActivity, employee)) continue
+        val processedNames = HashSet<String>()
+        val seenEmployeeNames = HashSet<String>()
+        val allChildren = mutableListOf<Pair<DataSnapshot, String?>>()
 
-            val employeeName = employee.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
-                ?: employee.child("name").value?.toString()
-                ?: "Employee"
-
-            val normName = if (employeeName != "Employee") employeeName.trim().lowercase(Locale.getDefault()) else employee.key ?: "unknown"
-            employeeDataMap.getOrPut(normName) { mutableListOf() }.add(employee)
+        if (appDevSnap != null) {
+            for (child in appDevSnap.children) allChildren.add(Pair(child, null))
+        }
+        if (rootEmpSnap != null) {
+            for (child in rootEmpSnap.children) allChildren.add(Pair(child, null))
+        }
+        if (compSnap != null) {
+            for (cSnap in compSnap.children) {
+                val compKey = cSnap.key ?: ""
+                for (child in cSnap.child("ApprovedDevices").children) allChildren.add(Pair(child, compKey))
+                for (child in cSnap.child("employees").children) allChildren.add(Pair(child, compKey))
+                for (child in cSnap.child("employeePins").children) allChildren.add(Pair(child, compKey))
+            }
         }
 
-        val seenEmployeeNames = HashSet<String>()
+        fun getLatestTrackingCoords(employeeKey: String, employeeName: String, phone: String, uid: String, androidId: String): Pair<Double?, Double?> {
+            val trackSnap = trackingSnapshot ?: return Pair(null, null)
 
-        for ((normName, records) in employeeDataMap) {
-            var hasAttendance = false
+            val candidateTracks = mutableListOf<DataSnapshot>()
+            val keysToCheck = listOfNotNull(
+                employeeKey,
+                employeeName,
+                phone,
+                uid,
+                androidId
+            ).filter { it.isNotBlank() }
+
+            for (k in keysToCheck) {
+                if (trackSnap.child(k).exists()) {
+                    candidateTracks.add(trackSnap.child(k))
+                }
+            }
+
+            for (childSnap in trackSnap.children) {
+                val cKey = childSnap.key ?: continue
+                if (keysToCheck.any { k -> cKey.equals(k, true) || cKey.contains(k, true) || k.contains(cKey, true) }) {
+                    if (!candidateTracks.contains(childSnap)) candidateTracks.add(childSnap)
+                }
+            }
+
+            for (empTrack in candidateTracks) {
+                var latestLat: Double? = null
+                var latestLng: Double? = null
+                var maxTimestamp = -1L
+
+                val directLat = empTrack.child("lat").getValue(Double::class.java) ?: empTrack.child("lat").value?.toString()?.toDoubleOrNull()
+                    ?: empTrack.child("latitude").getValue(Double::class.java) ?: empTrack.child("latitude").value?.toString()?.toDoubleOrNull()
+                val directLng = empTrack.child("lng").getValue(Double::class.java) ?: empTrack.child("lng").value?.toString()?.toDoubleOrNull()
+                    ?: empTrack.child("longitude").getValue(Double::class.java) ?: empTrack.child("longitude").value?.toString()?.toDoubleOrNull()
+                if (directLat != null && directLng != null) {
+                    return Pair(directLat, directLng)
+                }
+
+                for (dateOrTs in empTrack.children) {
+                    val lat = dateOrTs.child("lat").getValue(Double::class.java) ?: dateOrTs.child("lat").value?.toString()?.toDoubleOrNull()
+                        ?: dateOrTs.child("latitude").getValue(Double::class.java) ?: dateOrTs.child("latitude").value?.toString()?.toDoubleOrNull()
+                    val lng = dateOrTs.child("lng").getValue(Double::class.java) ?: dateOrTs.child("lng").value?.toString()?.toDoubleOrNull()
+                        ?: dateOrTs.child("longitude").getValue(Double::class.java) ?: dateOrTs.child("longitude").value?.toString()?.toDoubleOrNull()
+                    val ts = dateOrTs.child("timestamp").getValue(Long::class.java) ?: dateOrTs.key?.toLongOrNull() ?: 0L
+
+                    if (lat != null && lng != null) {
+                        if (ts >= maxTimestamp) {
+                            maxTimestamp = ts
+                            latestLat = lat
+                            latestLng = lng
+                        }
+                    }
+
+                    for (tsChild in dateOrTs.children) {
+                        val subLat = tsChild.child("lat").getValue(Double::class.java) ?: tsChild.child("lat").value?.toString()?.toDoubleOrNull()
+                            ?: tsChild.child("latitude").getValue(Double::class.java) ?: tsChild.child("latitude").value?.toString()?.toDoubleOrNull()
+                        val subLng = tsChild.child("lng").getValue(Double::class.java) ?: tsChild.child("lng").value?.toString()?.toDoubleOrNull()
+                            ?: tsChild.child("longitude").getValue(Double::class.java) ?: tsChild.child("longitude").value?.toString()?.toDoubleOrNull()
+                        val subTs = tsChild.child("timestamp").getValue(Long::class.java) ?: tsChild.key?.toLongOrNull() ?: 0L
+
+                        if (subLat != null && subLng != null) {
+                            if (subTs >= maxTimestamp) {
+                                maxTimestamp = subTs
+                                latestLat = subLat
+                                latestLng = subLng
+                            }
+                        }
+                    }
+                }
+
+                if (latestLat != null && latestLng != null) {
+                    return Pair(latestLat, latestLng)
+                }
+            }
+
+            return Pair(null, null)
+        }
+
+        fun extractCoords(ds: DataSnapshot?): Pair<Double?, Double?> {
+            if (ds == null || !ds.exists()) return Pair(null, null)
+            val lat = ds.child("latitude").getValue(Double::class.java) ?: ds.child("latitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lat").getValue(Double::class.java) ?: ds.child("lat").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lastLatitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("checkInLatitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("location").child("latitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("location").child("lat").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lastLocation").child("latitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lastLocation").child("lat").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("tracking").child("latitude").value?.toString()?.toDoubleOrNull()
+
+            val lng = ds.child("longitude").getValue(Double::class.java) ?: ds.child("longitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lng").getValue(Double::class.java) ?: ds.child("lng").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lastLongitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("checkInLongitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("location").child("longitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("location").child("lng").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lastLocation").child("longitude").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("lastLocation").child("lng").value?.toString()?.toDoubleOrNull()
+                ?: ds.child("tracking").child("longitude").value?.toString()?.toDoubleOrNull()
+
+            return Pair(lat, lng)
+        }
+
+        android.util.Log.d("MainActivityMap", "updateDashboardMap: total children collected = ${allChildren.size}, targetComp=${CompanyDataHelper.getCurrentCompanyId(this)}")
+
+        val validCompanyEmployeeNames = HashSet<String>()
+        for (pair in allChildren) {
+            val child = pair.first
+            val parentCompKey = pair.second
+            val employeeName = child.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
+                ?: child.child("name").value?.toString()
+                ?: continue
+            if (CompanyDataHelper.belongsToCurrentCompany(this@MainActivity, child, parentCompKey)) {
+                validCompanyEmployeeNames.add(employeeName.trim().lowercase(Locale.getDefault()))
+            }
+        }
+
+        val employeeRecordsByName = mutableMapOf<String, MutableList<Pair<DataSnapshot, String?>>>()
+
+        for (pair in allChildren) {
+            val child = pair.first
+            val parentCompKey = pair.second
+            val employeeName = child.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
+                ?: child.child("name").value?.toString()?.takeIf { it.isNotBlank() }
+                ?: continue
+
+            val normName = employeeName.trim().lowercase(Locale.getDefault())
+
+            val belongs = CompanyDataHelper.belongsToCurrentCompany(this@MainActivity, child, parentCompKey)
+
+            if (!belongs) continue
+
+            employeeRecordsByName.getOrPut(normName) { mutableListOf() }.add(pair)
+        }
+
+        for ((normName, pairs) in employeeRecordsByName) {
+            var employeeName = "Employee"
+            var hasActiveApprovedDevice = false
+            var isBlocked = false
+            var isOnlineSignal = false
             var finalLat: Double? = null
             var finalLng: Double? = null
-            var finalName = "Employee"
 
-            for (record in records) {
-                val deviceId = record.key ?: ""
-                val androidId = record.child("androidId").value?.toString() ?: ""
-                val uid = record.child("uid").value?.toString() ?: ""
-                val phone = record.child("phoneNumber").value?.toString() ?: record.child("mobileNumber").value?.toString() ?: ""
-
-                val name = record.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
-                    ?: record.child("name").value?.toString()
+            for (pair in pairs) {
+                val child = pair.first
+                val key = child.key ?: continue
+                val rawName = child.child("employeeName").value?.toString()?.takeIf { it.isNotBlank() }
+                    ?: child.child("name").value?.toString()
                     ?: "Employee"
-                
-                if (name != "Employee") {
-                    finalName = name
+                if (rawName != "Employee") {
+                    employeeName = rawName
                 }
 
-                if (attSnapshot.child(deviceId).hasChild(todayKey) ||
-                    (androidId.isNotBlank() && attSnapshot.child(androidId).hasChild(todayKey)) ||
-                    (uid.isNotBlank() && attSnapshot.child(uid).hasChild(todayKey)) ||
-                    (phone.isNotBlank() && attSnapshot.child(phone).hasChild(todayKey)) ||
-                    (name != "Employee" && attSnapshot.child(name).hasChild(todayKey))
-                ) {
-                    hasAttendance = true
+                val status = child.child("status").value?.toString()?.uppercase(Locale.getDefault()) ?: ""
+                val deviceStatus = child.child("deviceStatus").value?.toString()?.uppercase(Locale.getDefault()) ?: ""
+                val sessionStatus = child.child("sessionStatus").value?.toString()?.uppercase(Locale.getDefault()) ?: ""
+
+                val isApprovedNode = (status == "APPROVED" || status == "ONLINE" || status == "CHECKED_IN" || status == "ACTIVE" || deviceStatus == "APPROVED")
+                val isExplicitlyRevoked = (status == "DEREGISTERED" || status == "REVOKED" || deviceStatus == "REVOKED" || sessionStatus == "LOGOUT")
+
+                if (isApprovedNode && !isExplicitlyRevoked) {
+                    hasActiveApprovedDevice = true
                 }
 
-                val lat = record.child("latitude").value?.toString()?.toDoubleOrNull()
-                val lng = record.child("longitude").value?.toString()?.toDoubleOrNull()
+                if (status == "BLOCKED" || deviceStatus == "BLOCKED") {
+                    isBlocked = true
+                }
+
+                val rootEmpRecord = rootEmpSnap?.child(key)
+                val trackRecord = trackSnap?.child(key)
+
+                val (cLat, cLng) = extractCoords(child)
+                val (rLat, rLng) = extractCoords(rootEmpRecord)
+                val (tLat, tLng) = extractCoords(trackRecord)
+                val phone = child.child("phoneNumber").value?.toString() ?: child.child("mobileNumber").value?.toString() ?: ""
+                val uid = child.child("uid").value?.toString() ?: ""
+                val androidId = child.child("androidId").value?.toString() ?: ""
+                val (trLat, trLng) = getLatestTrackingCoords(key, employeeName, phone, uid, androidId)
+
+                val lat = cLat ?: rLat ?: tLat ?: trLat
+                val lng = cLng ?: rLng ?: tLng ?: trLng
+
                 if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
                     finalLat = lat
                     finalLng = lng
                 }
+
+                val lastUpdate = child.child("lastUpdate").getValue(Long::class.java) 
+                    ?: rootEmpRecord?.child("lastUpdate")?.getValue(Long::class.java) ?: 0L
+                val isRecentUpdate = (System.currentTimeMillis() - lastUpdate) < 86400000L // within last 24h
+
+                val nodeOnline = (status == "ONLINE" || status == "CHECKED_IN" || child.child("isOnline").value == true)
+                if ((isApprovedNode || nodeOnline) && (nodeOnline || isRecentUpdate || (finalLat != null && finalLng != null))) {
+                    isOnlineSignal = true
+                }
             }
 
-            if (hasAttendance) {
-                onlineList.add(finalName)
-            } else {
-                offlineList.add(finalName)
+            // An employee is TRULY online if they have an active approved status, an online signal, and are not blocked
+            val isTrulyOnline = hasActiveApprovedDevice && isOnlineSignal && !isBlocked
+
+            if (isTrulyOnline) {
+                onlineSet.add(employeeName)
+            } else if (hasActiveApprovedDevice && !isBlocked) {
+                offlineSet.add(employeeName)
             }
 
-            if (finalLat != null && finalLng != null) {
+            if (isTrulyOnline && finalLat != null && finalLng != null && finalLat != 0.0 && finalLng != 0.0) {
                 val location = LatLng(finalLat, finalLng)
-                seenEmployeeNames.add(finalName)
+                seenEmployeeNames.add(employeeName)
+                val statusTitle = employeeName
 
-                val existingMarker = employeeMarkers[finalName]
+                val existingMarker = employeeMarkers[employeeName]
                 if (existingMarker != null) {
                     existingMarker.position = location
-                    if (finalName == followedEmployeeName) {
+                    existingMarker.title = statusTitle
+                    if (employeeName == followedEmployeeName) {
                         existingMarker.showInfoWindow()
                     }
                 } else {
                     val newMarker = mMap.addMarker(
-                        MarkerOptions().position(location).title(finalName)
+                        MarkerOptions()
+                            .position(location)
+                            .title(statusTitle)
                     )
                     if (newMarker != null) {
-                        employeeMarkers[finalName] = newMarker
+                        employeeMarkers[employeeName] = newMarker
                     }
                 }
 
-                if (finalName == followedEmployeeName) {
+                if (employeeName == followedEmployeeName) {
                     mMap.animateCamera(CameraUpdateFactory.newLatLng(location))
-                }
-
-                checkGeofenceTransitions(finalName, finalLat, finalLng)
-
-                if (firstLocation == null) {
-                    firstLocation = location
                 }
             }
         }
+
+        // Guarantee mutual exclusivity: offlineSet must not contain anyone present in onlineSet!
+        offlineSet.removeAll(onlineSet)
 
         val markersToRemove = employeeMarkers.keys.filter { it !in seenEmployeeNames }
         for (name in markersToRemove) {
@@ -489,21 +715,64 @@ class MainActivity : AppCompatActivity(),
             }
         }
 
+        val onlineList = onlineSet.toList()
+        val offlineList = offlineSet.toList()
+
         onlineEmployeesText.text = "🟢 Online Employees (${onlineList.size})"
         onlineEmployeesNames.text = onlineList.joinToString(", ")
 
         offlineEmployeesText.text = "🔴 Offline Employees (${offlineList.size})"
         offlineEmployeesNames.text = offlineList.joinToString(", ")
+    }
 
-        if (!hasCenteredCameraOnce) {
-            firstLocation?.let {
-                mMap.moveCamera(
-                    CameraUpdateFactory.newLatLngZoom(
-                        it,
-                        15f
+    override fun onResume() {
+        super.onResume()
+        enableMyLocationOnMap()
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun enableMyLocationOnMap() {
+        if (!::mMap.isInitialized) return
+
+        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+        if (hasFine || hasCoarse) {
+            try {
+                mMap.isMyLocationEnabled = true
+                mMap.uiSettings.isMyLocationButtonEnabled = true
+
+                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+                fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                    if (location != null) {
+                        val userLatLng = LatLng(location.latitude, location.longitude)
+                        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(userLatLng, 16f))
+                    }
+                }
+
+                try {
+                    val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+                        com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 1000
                     )
-                )
-                hasCenteredCameraOnce = true
+                        .setMaxUpdates(1)
+                        .build()
+
+                    fusedLocationClient.requestLocationUpdates(
+                        locationRequest,
+                        object : com.google.android.gms.location.LocationCallback() {
+                            override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
+                                val loc = result.lastLocation ?: return
+                                val userLatLng = LatLng(loc.latitude, loc.longitude)
+                                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(userLatLng, 16f))
+                            }
+                        },
+                        android.os.Looper.getMainLooper()
+                    )
+                } catch (_: Exception) {}
+
+            } catch (e: SecurityException) {
+                e.printStackTrace()
             }
         }
     }
@@ -511,39 +780,20 @@ class MainActivity : AppCompatActivity(),
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
         
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            try {
-                mMap.isMyLocationEnabled = true
-            } catch (_: SecurityException) {}
+        // Default initial focus squarely on Pakistan (Okara / Punjab region)
+        val pakistanCenter = LatLng(30.8138, 73.4532)
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(pakistanCenter, 6.5f))
 
-            val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-                if (location != null) {
-                    val currentLatLng = LatLng(location.latitude, location.longitude)
-                    mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, 15f))
-                }
-            }
-        } else {
-            requestPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
-        }
+        enableMyLocationOnMap()
 
-        mMap.mapType = GoogleMap.MAP_TYPE_SATELLITE
+        mMap.mapType = GoogleMap.MAP_TYPE_HYBRID
         mMap.uiSettings.isMapToolbarEnabled = true
 
         mMap.setOnMarkerClickListener { marker ->
             followedEmployeeName = marker.title
-            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(marker.position, 18f))
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(marker.position, 17.5f))
             marker.showInfoWindow()
-            false
+            true
         }
 
         mMap.setOnMapLongClickListener { latLng ->
@@ -552,6 +802,7 @@ class MainActivity : AppCompatActivity(),
 
         loadDashboardGeofences()
         setupFirebaseListeners()
+        updateDashboardMap()
     }
 
     // ===================== GEOFENCE (SIMPLE CUSTOM INPUT + CONFIRM) =====================
@@ -760,8 +1011,72 @@ class MainActivity : AppCompatActivity(),
                     }
 
                 }
-
             )
 
+    }
+
+    private var dashboardRadiusStepIndex = -1 // -1 = Off
+    private val dashboardRadiusSteps = listOf(
+        Pair(7000.0, "7 km"),
+        Pair(14000.0, "14 km"),
+        Pair(21000.0, "21 km"),
+        Pair(28000.0, "28 km"),
+        Pair(35000.0, "35 km"),
+        Pair(40000.0, "40 km"), // Regional jump
+        Pair(50000.0, "50 km"),
+        Pair(65000.0, "65 km"),
+        Pair(80000.0, "80 km"),
+        Pair(100000.0, "100 km"),
+        Pair(120000.0, "120 km") // Max Pakistan/regional coverage
+    )
+
+    private fun toggleDashboardRadiusStep(button: Button) {
+        if (!::mMap.isInitialized) return
+        dashboardRadiusStepIndex++
+        if (dashboardRadiusStepIndex >= dashboardRadiusSteps.size) {
+            dashboardRadiusStepIndex = -1 // Off
+            button.text = "Off"
+        } else {
+            val (meters, label) = dashboardRadiusSteps[dashboardRadiusStepIndex]
+            button.text = label
+            applyDashboardRadius(meters, label)
+        }
+    }
+
+    private fun applyDashboardRadius(meters: Double, label: String) {
+        if (!::mMap.isInitialized) return
+
+        var sumLat = 0.0
+        var sumLng = 0.0
+        val count = employeeMarkers.size
+
+        val center: LatLng = if (count > 0) {
+            for (marker in employeeMarkers.values) {
+                sumLat += marker.position.latitude
+                sumLng += marker.position.longitude
+            }
+            LatLng(sumLat / count, sumLng / count)
+        } else {
+            mMap.cameraPosition.target
+        }
+
+        val zoom = getZoomLevelForRadius(meters)
+        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(center, zoom))
+    }
+
+    private fun getZoomLevelForRadius(meters: Double): Float {
+        return when {
+            meters <= 7000 -> 12.5f
+            meters <= 14000 -> 11.5f
+            meters <= 21000 -> 11.0f
+            meters <= 28000 -> 10.5f
+            meters <= 35000 -> 10.2f
+            meters <= 40000 -> 10.0f
+            meters <= 50000 -> 9.5f
+            meters <= 65000 -> 9.0f
+            meters <= 80000 -> 8.5f
+            meters <= 100000 -> 8.0f
+            else -> 7.5f
+        }
     }
 }

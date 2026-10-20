@@ -181,10 +181,23 @@ class CompanyViewModel : ViewModel() {
         })
     }
 
-    fun resetCompanyTestData(company: Company) {
+    fun softResetCompany(company: Company) {
+        repository.softResetCompany(company.companyId, object : CompanyRepository.SimpleCallback {
+            override fun onSuccess() {
+                _operationResult.value = "Company '${company.companyName}' (${company.companyId}) soft reset ho gayi."
+                loadCompanies()
+            }
+
+            override fun onError(message: String) {
+                _operationResult.value = "Error: $message"
+            }
+        })
+    }
+
+    fun hardResetCompany(company: Company) {
         repository.resetCompanyTestData(company.companyId, object : CompanyRepository.SimpleCallback {
             override fun onSuccess() {
-                _operationResult.value = "Company '${company.companyName}' (${company.companyId}) ka testing data reset ho gaya hai."
+                _operationResult.value = "Company '${company.companyName}' (${company.companyId}) hard reset (00) ho gayi."
                 loadCompanies()
             }
 

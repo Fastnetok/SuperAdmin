@@ -27,16 +27,18 @@
         android:id="@+id/unlockPinInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="PIN"
-        android:inputType="numberPassword"
-        android:maxLength="6" />
+        android:hint="PIN / ID"
+        android:inputType="textPassword"
+        android:maxLength="20"
+        android:visibility="gone" />
 
     <Button
         android:id="@+id/unlockButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Unlock"
-        android:layout_marginTop="12dp" />
+        android:layout_marginTop="12dp"
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/unlockStatusText"
@@ -52,6 +54,7 @@
         android:text="Forgot PIN? Logout"
         android:background="@null"
         android:textColor="#1565C0"
-        android:layout_marginTop="24dp" />
+        android:layout_marginTop="24dp"
+        android:visibility="gone" />
 
 </LinearLayout>

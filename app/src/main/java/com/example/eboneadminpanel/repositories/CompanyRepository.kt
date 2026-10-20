@@ -1,9 +1,13 @@
 package com.example.superadmin.repositories
 
+import com.example.superadmin.AppFeatures
+import com.example.superadmin.core.CompanyDataHelper
 import com.example.superadmin.core.FirestorePaths
 import com.example.superadmin.models.Company
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 
 class CompanyRepository {
 
@@ -25,21 +29,26 @@ class CompanyRepository {
         fun onError(message: String)
     }
 
-    fun checkEmailExists(email: String, excludeCompanyId: String? = null, callback: EmailCheckCallback) {
-        val cleanEmail = email.trim().lowercase()
-        if (cleanEmail.isEmpty()) {
+    fun checkEmailExists(email: String, excludeCompanyId: String?, callback: EmailCheckCallback) {
+        val clean = email.trim().lowercase()
+        if (clean.isBlank()) {
             callback.onResult(false)
             return
         }
+
         companiesRef.get()
             .addOnSuccessListener { snapshot ->
-                val exists = snapshot.documents.any { doc ->
-                    val docId = doc.id
-                    if (excludeCompanyId != null && docId == excludeCompanyId) {
-                        false
-                    } else {
-                        val companyEmail = doc.getString("adminEmail")?.trim()?.lowercase()
-                        companyEmail == cleanEmail
+                var exists = false
+                for (doc in snapshot.documents) {
+                    val comp = doc.toObject(Company::class.java)
+                    val existingEmail = comp?.adminEmail?.trim()?.lowercase().orEmpty()
+                    val existingId = comp?.companyId?.trim()?.uppercase() ?: doc.id.trim().uppercase()
+
+                    if (existingEmail == clean) {
+                        if (excludeCompanyId == null || existingId != excludeCompanyId.trim().uppercase()) {
+                            exists = true
+                            break
+                        }
                     }
                 }
                 callback.onResult(exists)
@@ -60,7 +69,79 @@ class CompanyRepository {
             .addOnSuccessListener {
                 val rtdb = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference("companies")
                 rtdb.child(canonicalId).setValue(company)
-                callback.onSuccess()
+
+                // 1. Initialize franchiseSettings with default disabled switches
+                val docId = CompanyDataHelper.getCanonicalDocId(company.companyId)
+                val cityDocId = CompanyDataHelper.getCanonicalDocId(company.city)
+                val companiesMap = AppFeatures.ALL_COMPANIES.associateWith { false }
+                val featuresMap = AppFeatures.ALL_FEATURES.associateWith { feat ->
+                    val clean = feat.trim().lowercase()
+                    if (clean.contains("movement tracking") || clean.contains("auto complaint") || clean.contains("webview")) {
+                        false
+                    } else {
+                        true
+                    }
+                }
+                val settingsData = mapOf(
+                    "enabledCompanies" to companiesMap,
+                    "enabledFeatures" to featuresMap,
+                    "cityName" to company.city
+                )
+                val firestore = FirebaseFirestore.getInstance()
+                firestore.collection("franchiseSettings").document(docId).set(settingsData, SetOptions.merge())
+                firestore.collection("franchiseSettings").document(cityDocId).set(settingsData, SetOptions.merge())
+
+                // 2. Automatically provision Firebase Auth account & admin record so company admin login works 100% seamlessly
+                val email = company.adminEmail.trim().lowercase()
+                val password = company.adminPassword.trim().ifEmpty { "12345678" }
+                if (email.isNotBlank()) {
+                    val auth = FirebaseAuth.getInstance()
+                    auth.createUserWithEmailAndPassword(email, password)
+                        .addOnSuccessListener { result ->
+                            val uid = result.user?.uid
+                            if (uid != null) {
+                                firestore.collection("admins").document(uid).set(
+                                    mapOf(
+                                        "role" to "company_admin",
+                                        "companyId" to company.companyId,
+                                        "companyName" to company.companyName,
+                                        "email" to email,
+                                        "active" to true
+                                    )
+                                ).addOnCompleteListener {
+                                    callback.onSuccess()
+                                }
+                            } else {
+                                callback.onSuccess()
+                            }
+                        }
+                        .addOnFailureListener {
+                            auth.signInWithEmailAndPassword(email, password)
+                                .addOnSuccessListener { signInResult ->
+                                    val uid = signInResult.user?.uid
+                                    if (uid != null) {
+                                        firestore.collection("admins").document(uid).set(
+                                            mapOf(
+                                                "role" to "company_admin",
+                                                "companyId" to company.companyId,
+                                                "companyName" to company.companyName,
+                                                "email" to email,
+                                                "active" to true
+                                            )
+                                        ).addOnCompleteListener {
+                                            callback.onSuccess()
+                                        }
+                                    } else {
+                                        callback.onSuccess()
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    callback.onSuccess()
+                                }
+                        }
+                } else {
+                    callback.onSuccess()
+                }
             }
             .addOnFailureListener { e -> callback.onError(e.message ?: "Company add nahi ho saki") }
     }
@@ -81,7 +162,6 @@ class CompanyRepository {
                     .distinctBy { it.companyId.trim().uppercase() }
 
                 if (uniqueCompanies.isEmpty()) {
-                    // Auto-purge all orphan registration data when 0 companies exist
                     purgeAllRegistrationData(null)
                 }
 
@@ -106,45 +186,167 @@ class CompanyRepository {
             .addOnFailureListener { e -> callback.onError(e.message ?: "Company update nahi ho saki") }
     }
 
+    fun deleteCompany(companyId: String, callback: SimpleCallback) {
+        val canonicalId = companyId.trim()
+        if (canonicalId.isBlank()) {
+            callback.onError("Company ID blank hai")
+            return
+        }
+
+        companiesRef.document(canonicalId).delete()
+            .addOnSuccessListener {
+                val rtdb = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference("companies")
+                rtdb.child(canonicalId).removeValue()
+
+                val docId = CompanyDataHelper.getCanonicalDocId(canonicalId)
+                val firestore = FirebaseFirestore.getInstance()
+                firestore.collection("franchiseSettings").document(docId).delete()
+
+                callback.onSuccess()
+            }
+            .addOnFailureListener { e -> callback.onError(e.message ?: "Company delete nahi ho saki") }
+    }
+
+    fun cleanOrphanedData() {
+        companiesRef.get().addOnSuccessListener { companySnap ->
+            val activeCompanyIds = mutableSetOf<String>()
+            for (doc in companySnap.documents) {
+                activeCompanyIds.add(doc.id.trim().uppercase())
+                doc.getString("companyId")?.let { activeCompanyIds.add(it.trim().uppercase()) }
+                doc.getString("companyCode")?.let { activeCompanyIds.add(it.trim().uppercase()) }
+                doc.getString("companyName")?.let { activeCompanyIds.add(it.trim().uppercase()) }
+            }
+
+            val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference()
+            val masterNodes = listOf("employees", "ApprovedDevices", "employeePins", "attendance", "tracking", "complaints")
+            for (node in masterNodes) {
+                rtdbRef.child(node).get().addOnSuccessListener { nodeSnap ->
+                    for (child in nodeSnap.children) {
+                        val compId = child.child("companyId").value?.toString() 
+                            ?: child.child("companyCode").value?.toString() 
+                            ?: child.child("companyName").value?.toString() 
+                            ?: child.child("company").value?.toString() ?: ""
+                        
+                        val cNorm = compId.trim().uppercase()
+
+                        val isOrphaned = cNorm.isBlank() || (activeCompanyIds.isNotEmpty() && !activeCompanyIds.contains(cNorm) && !activeCompanyIds.any { cNorm.contains(it) })
+
+                        if (isOrphaned) {
+                            child.ref.removeValue()
+                        }
+                    }
+                }
+            }
+
+            val firestore = FirebaseFirestore.getInstance()
+            firestore.collection("dealers").get().addOnSuccessListener { dealerSnap ->
+                val batch = firestore.batch()
+                var hasDeletes = false
+                for (doc in dealerSnap.documents) {
+                    val dComp = doc.getString("companyId") ?: doc.getString("company") ?: doc.getString("zone") ?: ""
+                    val dNorm = dComp.trim().uppercase()
+                    if (dNorm.isNotBlank() && activeCompanyIds.isNotEmpty() && !activeCompanyIds.contains(dNorm) && !activeCompanyIds.any { dNorm.contains(it) }) {
+                        batch.delete(doc.reference)
+                        hasDeletes = true
+                    }
+                }
+                if (hasDeletes) {
+                    batch.commit()
+                }
+            }
+        }
+    }
+
+    private fun isMatchingTargetCompany(child: com.google.firebase.database.DataSnapshot, targetId: String): Boolean {
+        val targetCanonical = CompanyDataHelper.normalizeToCanonical(targetId) ?: targetId.replace("-", "").uppercase()
+        val cleanTarget = targetId.replace("-", "").uppercase()
+        val key = child.key?.trim()?.uppercase() ?: ""
+
+        // 1. Check if key starts with prefix or canonical ID or clean target ID (e.g. GOJ, GOJ001, GOJ-01)
+        if (key.startsWith(targetCanonical) || key.startsWith(cleanTarget) ||
+            (targetCanonical.length >= 3 && key.startsWith(targetCanonical.take(3)))) {
+            return true
+        }
+
+        // 2. Check all possible company identifier tags in the child snapshot
+        val compVal = child.child("companyId").value?.toString()
+            ?: child.child("companyCode").value?.toString()
+            ?: child.child("companyName").value?.toString()
+            ?: child.child("company").value?.toString()
+            ?: child.child("zone").value?.toString()
+            ?: ""
+
+        if (compVal.isNotBlank()) {
+            val recordCanonical = CompanyDataHelper.normalizeToCanonical(compVal) ?: compVal.replace("-", "").uppercase()
+            val cleanCompVal = compVal.replace("-", "").uppercase()
+            if (recordCanonical == targetCanonical || cleanCompVal == cleanTarget ||
+                recordCanonical.contains(targetCanonical) || targetCanonical.contains(recordCanonical)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     fun resetCompanyTestData(companyId: String, callback: SimpleCallback) {
         val targetId = companyId.trim()
         if (targetId.isBlank()) {
             callback.onError("Company ID invalid hai")
             return
         }
-        val cleanId = targetId.replace("-", "")
+        val canonicalId = CompanyDataHelper.normalizeToCanonical(targetId) ?: targetId.replace("-", "").uppercase()
+        val cleanId = targetId.replace("-", "").uppercase()
 
-        purgeTargetRegistrationData(targetId, cleanId, object : SimpleCallback {
+        purgeTargetRegistrationData(targetId, object : SimpleCallback {
             override fun onSuccess() {
-                val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
-                val companySubNodes = listOf(
-                    "employees", "ApprovedDevices", "PendingDevices", "employeePins",
-                    "attendance", "complaints", "resolvedComplaints", "geofenceLogs",
-                    "adminNotifications", "employeeNotifications", "complaintEmployees"
-                )
+                val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference("companies")
+                
+                rtdbRef.child(targetId).removeValue()
+                rtdbRef.child(canonicalId).removeValue()
+                rtdbRef.child(cleanId).removeValue()
 
-                val targetCompRef = rtdbRef.getReference("companies").child(targetId)
-                val updateMap = mutableMapOf<String, Any?>()
-                for (subNode in companySubNodes) {
-                    updateMap[subNode] = null
-                }
-
-                // Delete any company specific admins from Firestore when resetting
                 val firestore = FirebaseFirestore.getInstance()
-                firestore.collection("admins").whereEqualTo("companyId", targetId).get().addOnSuccessListener { snaps ->
+                firestore.collection("admins").get().addOnSuccessListener { snaps ->
                     val batch = firestore.batch()
+                    var hasBatch = false
                     for (doc in snaps) {
-                        val email = doc.getString("email")?.trim()?.lowercase()
-                        if (email != "abbasok@gmail.com" && email?.contains("abbasok") != true) {
+                        val docCompId = doc.getString("companyId") ?: doc.getString("company") ?: ""
+                        val docEmail = doc.getString("email")?.trim()?.lowercase() ?: ""
+                        
+                        val matchesComp = docCompId.equals(targetId, ignoreCase = true) ||
+                            docCompId.equals(canonicalId, ignoreCase = true) ||
+                            docCompId.equals(cleanId, ignoreCase = true)
+
+                        if (matchesComp && docEmail != "abbasok@gmail.com" && !docEmail.contains("abbasok")) {
                             batch.delete(doc.reference)
+                            hasBatch = true
                         }
                     }
-                    batch.commit()
+                    if (hasBatch) {
+                        batch.commit()
+                    }
                 }
 
-                targetCompRef.updateChildren(updateMap).addOnCompleteListener {
-                    callback.onSuccess()
+                firestore.collection("dealers").get().addOnSuccessListener { snaps ->
+                    val batch = firestore.batch()
+                    var hasBatch = false
+                    for (doc in snaps) {
+                        val docComp = doc.getString("companyId") ?: doc.getString("company") ?: doc.getString("zone") ?: ""
+                        val docCanonical = CompanyDataHelper.normalizeToCanonical(docComp) ?: docComp.replace("-", "").uppercase()
+                        if (docCanonical == canonicalId || docComp.equals(targetId, ignoreCase = true)) {
+                            batch.delete(doc.reference)
+                            hasBatch = true
+                        }
+                    }
+                    if (hasBatch) {
+                        batch.commit()
+                    }
                 }
+
+                val docId = CompanyDataHelper.getCanonicalDocId(targetId)
+                firestore.collection("franchiseSettings").document(docId).delete()
+
+                callback.onSuccess()
             }
 
             override fun onError(message: String) {
@@ -153,304 +355,98 @@ class CompanyRepository {
         })
     }
 
-    fun deleteCompany(companyId: String, callback: SimpleCallback) {
+    fun softResetCompany(companyId: String, callback: SimpleCallback) {
         val targetId = companyId.trim()
         if (targetId.isBlank()) {
             callback.onError("Company ID invalid hai")
             return
         }
-        val cleanId = targetId.replace("-", "")
-        val cityPrefix = if (targetId.contains("-")) targetId.substringBefore("-").uppercase() else targetId.take(3).uppercase()
+        val canonicalId = CompanyDataHelper.normalizeToCanonical(targetId) ?: targetId.replace("-", "").uppercase()
+        val cleanId = targetId.replace("-", "").uppercase()
 
-        companiesRef.get().addOnSuccessListener { snapshot ->
-            val docsToDelete = snapshot.documents.filter { doc ->
-                val docCompanyId = doc.getString("companyId")?.trim()
-                doc.id.equals(targetId, ignoreCase = true) ||
-                doc.id.equals(cleanId, ignoreCase = true) ||
-                (docCompanyId != null && (docCompanyId.equals(targetId, ignoreCase = true) || docCompanyId.equals(cleanId, ignoreCase = true)))
-            }
+        val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference()
+        val softResetNodes = listOf("employees", "attendance", "tracking", "employeePins")
 
-            val batch = db.batch()
-            for (doc in docsToDelete) {
-                batch.delete(doc.reference)
-            }
+        var completed = 0
+        val total = softResetNodes.size
 
-            batch.commit().addOnSuccessListener {
-                companiesRef.get().addOnSuccessListener { remainingSnap ->
-                    val totalRemainingCompanies = remainingSnap.documents.size
-
-                    if (totalRemainingCompanies == 0) {
-                        purgeAllRegistrationData(object : SimpleCallback {
-                            override fun onSuccess() {
-                                db.collection(FirestorePaths.COUNTERS).document(cityPrefix).delete()
-                                callback.onSuccess()
-                            }
-
-                            override fun onError(message: String) {
-                                callback.onSuccess()
-                            }
-                        })
-                    } else {
-                        // Purge records matching this targetId
-                        purgeTargetRegistrationData(targetId, cleanId, object : SimpleCallback {
-                            override fun onSuccess() {
-                                val remainingForCity = remainingSnap.documents.any { doc ->
-                                    val cId = (doc.getString("companyId")?.trim() ?: doc.id.trim()).uppercase()
-                                    cId.startsWith("$cityPrefix-") || cId.startsWith(cityPrefix)
-                                }
-                                if (!remainingForCity) {
-                                    db.collection(FirestorePaths.COUNTERS).document(cityPrefix).delete()
-                                }
-                                callback.onSuccess()
-                            }
-
-                            override fun onError(message: String) {
-                                callback.onSuccess()
-                            }
-                        })
+        for (node in softResetNodes) {
+            rtdbRef.child(node).get().addOnSuccessListener { snapshot ->
+                for (child in snapshot.children) {
+                    if (isMatchingTargetCompany(child, targetId)) {
+                        child.ref.removeValue()
                     }
-                }.addOnFailureListener {
+                }
+                completed++
+                if (completed == total) {
+                    val compRef = rtdbRef.child("companies")
+                    compRef.child(targetId).child("employees").removeValue()
+                    compRef.child(targetId).child("attendance").removeValue()
+                    compRef.child(targetId).child("employeePins").removeValue()
+                    compRef.child(targetId).child("tracking").removeValue()
+
+                    compRef.child(canonicalId).child("employees").removeValue()
+                    compRef.child(canonicalId).child("attendance").removeValue()
+                    compRef.child(canonicalId).child("employeePins").removeValue()
+                    compRef.child(canonicalId).child("tracking").removeValue()
+
+                    compRef.child(cleanId).child("employees").removeValue()
+                    compRef.child(cleanId).child("attendance").removeValue()
+                    compRef.child(cleanId).child("employeePins").removeValue()
+                    compRef.child(cleanId).child("tracking").removeValue()
+
                     callback.onSuccess()
                 }
-            }.addOnFailureListener { e ->
-                callback.onError(e.message ?: "Company delete nahi ho saki")
+            }.addOnFailureListener {
+                completed++
+                if (completed == total) callback.onSuccess()
             }
-        }.addOnFailureListener { e ->
-            callback.onError(e.message ?: "Companies list fetch nahi ho saki")
         }
     }
 
-    /**
-     * Purges ALL registration nodes across Firestore and RTDB when 0 companies exist.
-     */
-    fun purgeAllRegistrationData(callback: SimpleCallback?) {
-        val fsCollections = listOf(
-            "employees", "ApprovedDevices", "PendingDevices", "employeePins",
-            "registeredDevices", "approved_devices", "pending_devices", "users",
-            "field_managers", "device_approvals", "deviceApprovals", "admins",
-            "complaints", "resolvedComplaints", "attendance", "geofenceLogs",
-            "adminNotifications", "employeeNotifications", "complaintEmployees",
-            "employeeComplaints"
+    private fun purgeTargetRegistrationData(targetId: String, callback: SimpleCallback) {
+        val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference()
+        val paths = listOf(
+            rtdbRef.child("ApprovedDevices"),
+            rtdbRef.child("PendingDevices"),
+            rtdbRef.child("employeePins"),
+            rtdbRef.child("employees"),
+            rtdbRef.child("attendance"),
+            rtdbRef.child("tracking"),
+            rtdbRef.child("complaints"),
+            rtdbRef.child("resolvedComplaints"),
+            rtdbRef.child("geofenceLogs"),
+            rtdbRef.child("adminNotifications"),
+            rtdbRef.child("employeeNotifications"),
+            rtdbRef.child("complaintEmployees"),
+            rtdbRef.child("fuelLogs"),
+            rtdbRef.child("reliefLogs")
         )
 
-        for (colName in fsCollections) {
-            db.collection(colName).get().addOnSuccessListener { colSnap ->
-                val batch = db.batch()
-                for (doc in colSnap.documents) {
-                    // Do not delete SuperAdmin from admins collection
-                    if (colName == "admins") {
-                        val email = doc.getString("email")?.trim()?.lowercase()
-                        if (email == "abbasok@gmail.com" || email?.contains("abbasok") == true) {
-                            continue
-                        }
+        var completed = 0
+        val total = paths.size
+        for (pathRef in paths) {
+            pathRef.get().addOnSuccessListener { snapshot ->
+                for (child in snapshot.children) {
+                    if (isMatchingTargetCompany(child, targetId)) {
+                        child.ref.removeValue()
                     }
-                    batch.delete(doc.reference)
                 }
-                batch.commit()
+                completed++
+                if (completed == total) callback.onSuccess()
+            }.addOnFailureListener {
+                completed++
+                if (completed == total) callback.onSuccess()
             }
         }
+    }
 
+    private fun purgeAllRegistrationData(callback: SimpleCallback?) {
         val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
-        val rtdbNodes = listOf(
-            "companies", "employees", "ApprovedDevices", "PendingDevices", "employeePins",
-            "registeredDevices", "approved_devices", "pending_devices", "users",
-            "field_managers", "device_approvals", "deviceApprovals", "activeSessions",
-            "complaints", "resolvedComplaints", "attendance", "geofenceLogs",
-            "adminNotifications", "employeeNotifications", "complaintEmployees", "employeeComplaints"
-        )
-
-        var remaining = rtdbNodes.size
-        fun checkFinished() {
-            remaining--
-            if (remaining <= 0) {
-                callback?.onSuccess()
-            }
+        val masterNodes = listOf("ApprovedDevices", "PendingDevices", "employeePins", "employees", "attendance", "complaints", "tracking")
+        for (node in masterNodes) {
+            rtdbRef.getReference(node).removeValue()
         }
-
-        for (nodeName in rtdbNodes) {
-            rtdbRef.getReference(nodeName).removeValue().addOnCompleteListener {
-                checkFinished()
-            }
-        }
-    }
-
-    /**
-     * Purges target company registration nodes across Firestore and RTDB.
-     */
-    fun purgeTargetRegistrationData(targetId: String, cleanId: String, callback: SimpleCallback) {
-        val fsCollections = listOf(
-            "employees", "ApprovedDevices", "PendingDevices", "employeePins",
-            "registeredDevices", "approved_devices", "pending_devices", "users",
-            "field_managers", "device_approvals", "deviceApprovals", "admins",
-            "complaints", "resolvedComplaints", "attendance", "geofenceLogs",
-            "adminNotifications", "employeeNotifications", "complaintEmployees",
-            "employeeComplaints"
-        )
-
-        fun matchesCompanyFields(cId: String?, cName: String?, cCode: String?, cCompany: String?): Boolean {
-            val allFields = listOf(cId, cName, cCode, cCompany)
-            return allFields.any { field ->
-                field != null && field.isNotBlank() && (
-                    field.trim().equals(targetId, ignoreCase = true) ||
-                    field.trim().equals(cleanId, ignoreCase = true) ||
-                    field.trim().replace("-", "").equals(cleanId, ignoreCase = true)
-                )
-            }
-        }
-
-        for (colName in fsCollections) {
-            db.collection(colName).get().addOnSuccessListener { colSnap ->
-                val batch = db.batch()
-                for (doc in colSnap.documents) {
-                    val cId = doc.getString("companyId")
-                    val cName = doc.getString("companyName")
-                    val cCode = doc.getString("companyCode")
-                    val cCompany = doc.getString("company")
-                    if (matchesCompanyFields(cId, cName, cCode, cCompany)) {
-                        batch.delete(doc.reference)
-                    }
-                }
-                batch.commit()
-            }
-        }
-
-        val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
-        val rtdbNodes = listOf(
-            "companies", "employees", "ApprovedDevices", "PendingDevices", "employeePins",
-            "registeredDevices", "approved_devices", "pending_devices", "users",
-            "field_managers", "device_approvals", "deviceApprovals", "activeSessions",
-            "complaints", "resolvedComplaints", "attendance", "geofenceLogs",
-            "adminNotifications", "employeeNotifications", "complaintEmployees", "employeeComplaints"
-        )
-
-        var remaining = rtdbNodes.size
-        fun checkFinished() {
-            remaining--
-            if (remaining <= 0) {
-                callback.onSuccess()
-            }
-        }
-
-        for (nodeName in rtdbNodes) {
-            val nodeRef = rtdbRef.getReference(nodeName)
-            nodeRef.get().addOnSuccessListener { nodeSnap ->
-                val nodeUpdates = mutableMapOf<String, Any?>()
-                for (c in nodeSnap.children) {
-                    val cId = c.child("companyId").getValue(String::class.java)
-                    val cName = c.child("companyName").getValue(String::class.java)
-                    val cCode = c.child("companyCode").getValue(String::class.java)
-                    val cCompany = c.child("company").getValue(String::class.java)
-
-                    if (matchesCompanyFields(cId, cName, cCode, cCompany) || c.key.equals(targetId, ignoreCase = true) || c.key.equals(cleanId, ignoreCase = true)) {
-                        nodeUpdates[c.key!!] = null
-                    } else {
-                        // Check nested children (e.g. employeeComplaints -> employeeKey -> complaintKey)
-                        for (subChild in c.children) {
-                            val subCId = subChild.child("companyId").getValue(String::class.java)
-                            val subCName = subChild.child("companyName").getValue(String::class.java)
-                            val subCCode = subChild.child("companyCode").getValue(String::class.java)
-                            val subCComp = subChild.child("company").getValue(String::class.java)
-                            if (matchesCompanyFields(subCId, subCName, subCCode, subCComp) || subChild.key.equals(targetId, ignoreCase = true) || subChild.key.equals(cleanId, ignoreCase = true)) {
-                                nodeUpdates["${c.key}/${subChild.key}"] = null
-                            }
-                        }
-                    }
-                }
-                if (nodeUpdates.isNotEmpty()) {
-                    nodeRef.updateChildren(nodeUpdates).addOnCompleteListener { checkFinished() }
-                } else {
-                    checkFinished()
-                }
-            }.addOnFailureListener { checkFinished() }
-        }
-    }
-
-    /**
-     * Scans and removes any orphaned data (complaints, attendance, etc.)
-     * belonging to deleted or non-existent companies.
-     */
-    fun cleanOrphanedData(callback: SimpleCallback? = null) {
-        companiesRef.get().addOnSuccessListener { snapshot ->
-            val activeCompanyIds = snapshot.documents.mapNotNull { doc ->
-                doc.getString("companyId")?.trim()?.uppercase() ?: doc.id.trim().uppercase()
-            }.toSet()
-
-            if (activeCompanyIds.isEmpty()) {
-                purgeAllRegistrationData(callback)
-                return@addOnSuccessListener
-            }
-
-            val cleanActiveCompanyIds = activeCompanyIds.map { it.replace("-", "") }.toSet()
-
-            fun matchesAnyActive(cId: String?, cName: String?, cCode: String?, cCompany: String?): Boolean {
-                val allFields = listOf(cId, cName, cCode, cCompany).filterNotNull().filter { it.isNotBlank() }
-                if (allFields.isEmpty()) return true
-                return allFields.any { field ->
-                    val clean = field.trim().uppercase().replace("-", "")
-                    val raw = field.trim().uppercase()
-                    activeCompanyIds.contains(raw) || cleanActiveCompanyIds.contains(clean)
-                }
-            }
-
-            val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
-            val rtdbNodes = listOf(
-                "complaints", "resolvedComplaints", "employeeComplaints", "attendance",
-                "geofenceLogs", "adminNotifications", "employeeNotifications", "complaintEmployees"
-            )
-
-            var remaining = rtdbNodes.size
-            fun checkFinished() {
-                remaining--
-                if (remaining <= 0) {
-                    callback?.onSuccess()
-                }
-            }
-
-            for (nodeName in rtdbNodes) {
-                val nodeRef = rtdbRef.getReference(nodeName)
-                nodeRef.get().addOnSuccessListener { nodeSnap ->
-                    val nodeUpdates = mutableMapOf<String, Any?>()
-                    for (c in nodeSnap.children) {
-                        val cId = c.child("companyId").getValue(String::class.java)
-                        val cName = c.child("companyName").getValue(String::class.java)
-                        val cCode = c.child("companyCode").getValue(String::class.java)
-                        val cCompany = c.child("company").getValue(String::class.java)
-
-                        val hasFields = listOf(cId, cName, cCode, cCompany).any { !it.isNullOrBlank() }
-                        if (hasFields && !matchesAnyActive(cId, cName, cCode, cCompany)) {
-                            nodeUpdates[c.key!!] = null
-                        } else {
-                            // Check nested children (e.g. employeeComplaints -> employeeKey -> complaintKey)
-                            var allSubChildrenOrphaned = c.children.count() > 0
-                            for (subChild in c.children) {
-                                val subCId = subChild.child("companyId").getValue(String::class.java)
-                                val subCName = subChild.child("companyName").getValue(String::class.java)
-                                val subCCode = subChild.child("companyCode").getValue(String::class.java)
-                                val subCComp = subChild.child("company").getValue(String::class.java)
-
-                                val subHasFields = listOf(subCId, subCName, subCCode, subCComp).any { !it.isNullOrBlank() }
-                                if (subHasFields && !matchesAnyActive(subCId, subCName, subCCode, subCComp)) {
-                                    nodeUpdates["${c.key}/${subChild.key}"] = null
-                                } else if (!subHasFields) {
-                                    allSubChildrenOrphaned = false
-                                } else {
-                                    allSubChildrenOrphaned = false
-                                }
-                            }
-                            if (allSubChildrenOrphaned) {
-                                nodeUpdates[c.key!!] = null
-                            }
-                        }
-                    }
-                    if (nodeUpdates.isNotEmpty()) {
-                        nodeRef.updateChildren(nodeUpdates).addOnCompleteListener { checkFinished() }
-                    } else {
-                        checkFinished()
-                    }
-                }.addOnFailureListener { checkFinished() }
-            }
-        }.addOnFailureListener {
-            callback?.onError("Failed to fetch active companies for cleanup")
-        }
+        callback?.onSuccess()
     }
 }

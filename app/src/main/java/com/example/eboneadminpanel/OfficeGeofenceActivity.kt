@@ -10,10 +10,14 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Locale
 
 class OfficeGeofenceActivity : AppCompatActivity() {
@@ -25,12 +29,81 @@ class OfficeGeofenceActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvCurrentSettings: TextView
     private lateinit var employeeContainer: LinearLayout
+    private lateinit var spinnerCompany: Spinner
+    private var availableCompanies = listOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildLayout())
-        loadCurrentGeofence()
-        loadEmployeesWithAttendance()
+        loadCompaniesSpinner()
+    }
+
+    private fun loadCompaniesSpinner() {
+        val isSuper = CompanyDataHelper.isSuperAdmin(this)
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
+        val isOwner = currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true
+
+        if (!isSuper && !isOwner) {
+            val myComp = SessionManager(this).getCompanyId()?.trim()?.uppercase() ?: "OKA-001"
+            availableCompanies = listOf(myComp)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompanies)
+            spinnerCompany.adapter = adapter
+            spinnerCompany.isEnabled = false
+            spinnerCompany.alpha = 0.6f
+            loadCurrentGeofence()
+            loadEmployeesWithAttendance()
+            return
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection("companies").get().addOnSuccessListener { snap ->
+            val set = mutableSetOf<String>()
+            set.add("All Companies")
+            snap.documents.forEach { doc ->
+                val id = doc.id.trim().uppercase()
+                if (CompanyDataHelper.isValidCompanyId(id)) set.add(id)
+                doc.getString("companyId")?.let {
+                    val cid = it.trim().uppercase()
+                    if (CompanyDataHelper.isValidCompanyId(cid)) set.add(cid)
+                }
+                doc.getString("companyName")?.let {
+                    val cname = it.trim().uppercase()
+                    if (CompanyDataHelper.isValidCompanyId(cname)) set.add(cname)
+                }
+            }
+            availableCompanies = set.toList().sorted()
+            if (availableCompanies.isEmpty()) availableCompanies = listOf("OKA-001", "DEP-001")
+
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompanies)
+            spinnerCompany.adapter = adapter
+
+            val activeComp = SessionManager(this).getActiveCompanyId() ?: availableCompanies.first()
+            val idx = availableCompanies.indexOfFirst { it.equals(activeComp, true) }.coerceAtLeast(0)
+            spinnerCompany.setSelection(idx)
+
+            spinnerCompany.isEnabled = true
+            spinnerCompany.alpha = 1.0f
+
+            spinnerCompany.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: AdapterView<*>?, v0: View?, pos: Int, id: Long) {
+                    val comp = availableCompanies.getOrNull(pos) ?: return
+                    SessionManager(this@OfficeGeofenceActivity).saveActiveCompany(comp)
+                    loadCurrentGeofence()
+                    loadEmployeesWithAttendance()
+                }
+                override fun onNothingSelected(p0: AdapterView<*>?) {}
+            }
+            loadCurrentGeofence()
+            loadEmployeesWithAttendance()
+        }.addOnFailureListener {
+            availableCompanies = listOf("OKA-001", "DEP-001", "DEP-002")
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompanies)
+            spinnerCompany.adapter = adapter
+            spinnerCompany.isEnabled = true
+            spinnerCompany.alpha = 1.0f
+            loadCurrentGeofence()
+            loadEmployeesWithAttendance()
+        }
     }
 
     private fun buildLayout(): View {
@@ -70,6 +143,19 @@ class OfficeGeofenceActivity : AppCompatActivity() {
             setPadding(px(12,dp), px(12,dp), px(12,dp), px(12,dp))
         }
         scroll.addView(content)
+
+        // ── Company / City Selector Card ──
+        val companyCard = card(dp)
+        companyCard.addView(
+            tv("Select Company / City", 12f, Color.parseColor("#757575")).also {
+                it.layoutParams = lp().also { m -> m.bottomMargin = px(4, dp) }
+            }
+        )
+        spinnerCompany = Spinner(this).apply {
+            layoutParams = lp().also { it.bottomMargin = px(4, dp) }
+        }
+        companyCard.addView(spinnerCompany)
+        content.addView(companyCard)
 
         // Current settings card
         val currentCard = card(dp)
@@ -149,23 +235,19 @@ class OfficeGeofenceActivity : AppCompatActivity() {
             setOnClickListener { copyFromDashboardGeofence() }
         }.also { setCard.addView(it) }
 
-        // Save
+        // Save Button
         Button(this).apply {
-            text = "Save Geofence"; textSize = 14f; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = 10f*dp; setColor(Color.parseColor("#1565C0")) }
-            layoutParams = lp()
+            text = "Save Office Geofence"; textSize = 14f; setTextColor(Color.WHITE)
+            background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = 10f*dp; setColor(Color.parseColor("#0D2E5C")) }
+            layoutParams = lp().also { it.bottomMargin = px(12,dp) }
             setOnClickListener { saveGeofence() }
         }.also { setCard.addView(it) }
+
+        tvStatus = tv("", 12f, Color.parseColor("#2E7D32")).also { it.layoutParams = lp() }
+        setCard.addView(tvStatus)
         content.addView(setCard)
 
-        // Status
-        tvStatus = tv("", 13f, Color.parseColor("#2E7D32")).also {
-            it.gravity = Gravity.CENTER
-            it.layoutParams = lp().also { m -> m.topMargin = px(8,dp) }
-        }
-        content.addView(tvStatus)
-
-        // Employee Attendance List Card
+        // Employees attendance card
         val empCard = card(dp)
         empCard.addView(tv("Today's Employee Attendance", 14f, Color.parseColor("#111111"), bold = true).also {
             it.layoutParams = lp().also { m -> m.bottomMargin = px(8,dp) }
@@ -197,7 +279,7 @@ class OfficeGeofenceActivity : AppCompatActivity() {
             val uniqueEmpMap = mutableMapOf<String, GeofenceEmp>()
 
             for (emp in empSnap.children) {
-                if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
+                if (!CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
                 val rawName = emp.child("employeeName").value?.toString()
                     ?.takeIf { it.isNotBlank() }
                     ?: emp.child("name").value?.toString()
@@ -253,7 +335,6 @@ class OfficeGeofenceActivity : AppCompatActivity() {
                         row.addView(nameView)
                         row.addView(statusView)
 
-                        // Divider
                         val divider = View(this).apply {
                             setBackgroundColor(Color.parseColor("#EEEEEE"))
                             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
@@ -269,15 +350,27 @@ class OfficeGeofenceActivity : AppCompatActivity() {
     }
 
     private fun loadCurrentGeofence() {
-        db.getReference("attendanceGeofence").get().addOnSuccessListener { snap ->
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        db.getReference("attendanceGeofence").child(compId).get().addOnSuccessListener { snap ->
             val lat = snap.child("lat").value?.toString() ?: ""
             val lng = snap.child("lng").value?.toString() ?: ""
             val radius = snap.child("radius").value?.toString() ?: ""
             if (lat.isEmpty()) {
-                tvCurrentSettings.text = "No geofence set yet"
-                tvCurrentSettings.setTextColor(Color.parseColor("#9E9E9E"))
+                db.getReference("attendanceGeofence").get().addOnSuccessListener { rootSnap ->
+                    val rLat = rootSnap.child("lat").value?.toString() ?: ""
+                    val rLng = rootSnap.child("lng").value?.toString() ?: ""
+                    val rRadius = rootSnap.child("radius").value?.toString() ?: ""
+                    if (rLat.isEmpty()) {
+                        tvCurrentSettings.text = "No geofence set yet for $compId"
+                        tvCurrentSettings.setTextColor(Color.parseColor("#9E9E9E"))
+                    } else {
+                        tvCurrentSettings.text = "Lat: $rLat\nLng: $rLng\nRadius: ${rRadius}m ($compId)"
+                        tvCurrentSettings.setTextColor(Color.parseColor("#2E7D32"))
+                        etLat.setText(rLat); etLng.setText(rLng); etRadius.setText(rRadius)
+                    }
+                }
             } else {
-                tvCurrentSettings.text = "Lat: $lat\nLng: $lng\nRadius: ${radius}m"
+                tvCurrentSettings.text = "Lat: $lat\nLng: $lng\nRadius: ${radius}m ($compId)"
                 tvCurrentSettings.setTextColor(Color.parseColor("#2E7D32"))
                 etLat.setText(lat); etLng.setText(lng); etRadius.setText(radius)
             }
@@ -307,11 +400,12 @@ class OfficeGeofenceActivity : AppCompatActivity() {
         if (lat == null || lng == null) { showMsg("Valid latitude/longitude required."); return }
         if (radius == null || radius <= 0) { showMsg("Valid radius required."); return }
 
-        db.getReference("attendanceGeofence").setValue(mapOf("lat" to lat, "lng" to lng, "radius" to radius))
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        db.getReference("attendanceGeofence").child(compId).setValue(mapOf("lat" to lat, "lng" to lng, "radius" to radius))
             .addOnSuccessListener {
-                tvStatus.text = "Saved! Lat: $lat, Lng: $lng, Radius: ${radius.toInt()}m"
+                tvStatus.text = "Saved for $compId! Lat: $lat, Lng: $lng, Radius: ${radius.toInt()}m"
                 tvStatus.setTextColor(Color.parseColor("#2E7D32"))
-                tvCurrentSettings.text = "Lat: $lat\nLng: $lng\nRadius: ${radius.toInt()}m"
+                tvCurrentSettings.text = "Lat: $lat\nLng: $lng\nRadius: ${radius.toInt()}m ($compId)"
                 tvCurrentSettings.setTextColor(Color.parseColor("#2E7D32"))
                 loadEmployeesWithAttendance()
             }

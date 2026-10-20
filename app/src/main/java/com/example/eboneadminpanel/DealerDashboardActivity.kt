@@ -10,6 +10,7 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.example.superadmin.core.CompanyDataHelper
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -383,7 +384,10 @@ class DealerDashboardActivity : AppCompatActivity() {
     private fun observeDealerStats() {
         dealersListener = db.collection("dealers")
             .addSnapshotListener { query, _ ->
-                totalDealersText.text = (query?.size() ?: 0).toString()
+                val count = query?.documents?.count { doc ->
+                    CompanyDataHelper.belongsToCurrentCompany(this, doc)
+                } ?: 0
+                totalDealersText.text = count.toString()
             }
 
         val cal = Calendar.getInstance()

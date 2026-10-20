@@ -11,7 +11,10 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
 import com.google.firebase.database.*
+import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -38,6 +41,8 @@ class SalaryHistoryActivity : AppCompatActivity() {
     private lateinit var btnMarkPaid: Button
     private lateinit var breakdownContainer: LinearLayout
     private lateinit var employeeSpinner: Spinner
+    private lateinit var companySpinner: Spinner
+    private var availableCompaniesList = listOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,7 +50,7 @@ class SalaryHistoryActivity : AppCompatActivity() {
         employeeName = intent.getStringExtra("employeeName") ?: ""
         baseSalary = intent.getDoubleExtra("baseSalary", 0.0)
         setContentView(buildLayout())
-        loadEmployees()
+        loadCompaniesSpinner()
     }
 
     private fun buildLayout(): View {
@@ -106,6 +111,19 @@ class SalaryHistoryActivity : AppCompatActivity() {
             setPadding(px(12,dp), px(12,dp), px(12,dp), px(12,dp))
         }
         scroll.addView(content)
+
+        // ── Company Selector Card ──
+        val companyCard = card(dp)
+        companyCard.addView(
+            tv("Select Company / License", 12f, Color.parseColor("#757575")).also {
+                it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
+            }
+        )
+        companySpinner = Spinner(this).apply {
+            layoutParams = llp().also { it.bottomMargin = px(4, dp) }
+        }
+        companyCard.addView(companySpinner)
+        content.addView(companyCard)
 
         // ── Employee + Month Selector Card ──
         val selectorCard = card(dp)
@@ -313,6 +331,58 @@ class SalaryHistoryActivity : AppCompatActivity() {
     }
 
     // ─── LOAD DATA ───
+
+    private fun loadCompaniesSpinner() {
+        val isSuper = CompanyDataHelper.isSuperAdmin(this)
+        if (!isSuper) {
+            val myComp = SessionManager(this).getCompanyId()?.trim()?.uppercase() ?: "OKA-001"
+            availableCompaniesList = listOf(myComp)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = false
+            companySpinner.alpha = 0.6f
+            loadEmployees()
+            return
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection("companies").get().addOnSuccessListener { snap ->
+            val set = mutableSetOf<String>()
+            set.add("All Companies")
+            snap.documents.forEach { doc ->
+                val id = doc.id.trim().uppercase()
+                if (CompanyDataHelper.isValidCompanyId(id)) set.add(id)
+                doc.getString("companyId")?.let {
+                    val cid = it.trim().uppercase()
+                    if (CompanyDataHelper.isValidCompanyId(cid)) set.add(cid)
+                }
+            }
+            availableCompaniesList = set.toList().sorted()
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+
+            val activeComp = SessionManager(this).getActiveCompanyId() ?: "All Companies"
+            val idx = availableCompaniesList.indexOfFirst { it.equals(activeComp, true) }.coerceAtLeast(0)
+            companySpinner.setSelection(idx)
+
+            companySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: AdapterView<*>?, v0: View?, pos: Int, id: Long) {
+                    val comp = availableCompaniesList.getOrNull(pos) ?: return
+                    SessionManager(this@SalaryHistoryActivity).saveActiveCompany(comp)
+                    loadEmployees()
+                }
+                override fun onNothingSelected(p0: AdapterView<*>?) {}
+            }
+            loadEmployees()
+        }.addOnFailureListener {
+            availableCompaniesList = listOf("All Companies", "OKA-001", "DEP-001", "DEP-002")
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            loadEmployees()
+        }
+    }
 
     private fun loadEmployees() {
         db.getReference("employees").get().addOnSuccessListener { snap ->

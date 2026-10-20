@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Set a Quick-Unlock PIN"
+        android:text="Set a Quick-Unlock PIN / ID"
         android:textSize="20sp"
         android:textStyle="bold"
         android:layout_marginBottom="8dp" />
@@ -17,7 +17,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="4 to 6 digits — app ke dobara khulne par ye PIN ya fingerprint use hoga"
+        android:text="Enter PIN or Company ID (e.g. DEP-001-1)"
         android:textSize="13sp"
         android:layout_marginBottom="24dp" />
 
@@ -25,17 +25,17 @@
         android:id="@+id/pinInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Naya PIN"
-        android:inputType="numberPassword"
-        android:maxLength="6" />
+        android:hint="Naya PIN / ID"
+        android:inputType="textPassword"
+        android:maxLength="20" />
 
     <EditText
         android:id="@+id/pinConfirmInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="PIN dobara likhein"
-        android:inputType="numberPassword"
-        android:maxLength="6"
+        android:hint="PIN / ID dobara likhein"
+        android:inputType="textPassword"
+        android:maxLength="20"
         android:layout_marginTop="12dp" />
 
     <Button

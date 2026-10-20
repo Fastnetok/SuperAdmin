@@ -317,19 +317,29 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
 
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
-        mMap.mapType = GoogleMap.MAP_TYPE_SATELLITE
+        mMap.mapType = GoogleMap.MAP_TYPE_HYBRID
+
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try {
+                mMap.isMyLocationEnabled = true
+                mMap.uiSettings.isMyLocationButtonEnabled = true
+            } catch (_: SecurityException) {}
+        }
+
         mapReady = true
         applyPendingDefaultCameraIfReady()
 
-        // Tapping a marker on the map -> scroll + highlight the matching
-        // row in the Movement Points list below, so its time is visible
+        // Tapping a marker on the map -> smooth zoom in to street level (17.5f) + show info window + highlight list row
         mMap.setOnMarkerClickListener { marker ->
             val index = waypointMarkers.indexOf(marker)
             if (index >= 0) {
                 pointsRecyclerView.smoothScrollToPosition(index)
                 pointAdapter.setHighlighted(index)
             }
-            false // still show the marker's default info window / re-center
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(marker.position, 17.5f))
+            marker.showInfoWindow()
+            true
         }
     }
 

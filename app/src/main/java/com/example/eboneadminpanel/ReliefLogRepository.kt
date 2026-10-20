@@ -23,11 +23,13 @@ object ReliefLogRepository {
         company: String,
         reliefDays: Int,
         expectedExpiryAt: Long,
-        isTest: Boolean = false
+        isTest: Boolean = false,
+        companyId: String? = null
     ) {
         val data = hashMapOf(
             "customerId" to customerId,
             "company" to company.uppercase(),
+            "companyId" to (companyId?.uppercase() ?: company.uppercase()),
             "activatedAt" to System.currentTimeMillis(),
             "reliefDays" to reliefDays,
             "expectedExpiryAt" to expectedExpiryAt,

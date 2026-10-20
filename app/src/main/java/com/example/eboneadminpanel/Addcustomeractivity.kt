@@ -46,26 +46,8 @@ class AddCustomerActivity : AppCompatActivity() {
         binding = ActivityAddCustomerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
-        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
-            companies.clear()
-            companies.addAll(enabledCompanies)
-            if (companies.isNotEmpty()) {
-                latestSearchCompany = companies.first()
-            }
-            binding.spinnerCompany.adapter = ArrayAdapter(
-                this,
-                android.R.layout.simple_spinner_dropdown_item,
-                companies
-            )
-        }
-
         generateNewPin()
 
-        // CustomerBillingActivity-style search:
-        // Firebase customers are loaded once, then the current ISP filter and
-        // typed text are applied locally. This avoids a query on every keypress
-        // and gives the same stable suggestion behaviour used by Total Accounts.
         val suggestionsAdapter = SuggestionsAdapter(this)
 
         binding.etCustomerId.threshold = 1
@@ -77,13 +59,30 @@ class AddCustomerActivity : AppCompatActivity() {
             val company =
                 companies.getOrNull(
                     binding.spinnerCompany.selectedItemPosition
-                ) ?: companies.first()
+                ) ?: companies.firstOrNull() ?: "EBONE"
 
             loadCustomersForSearch(
                 company = company,
                 query = query,
                 adapter = suggestionsAdapter
             )
+        }
+
+        val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
+            companies.clear()
+            if (enabledCompanies.isNotEmpty()) {
+                companies.addAll(enabledCompanies)
+            } else {
+                companies.addAll(listOf("EBONE", "WATEEN", "ZONG", "JAZZ"))
+            }
+            latestSearchCompany = companies.firstOrNull() ?: "EBONE"
+            binding.spinnerCompany.adapter = ArrayAdapter(
+                this,
+                android.R.layout.simple_spinner_dropdown_item,
+                companies
+            )
+            updateCustomerSuggestions()
         }
 
         binding.etCustomerId.addTextChangedListener(
@@ -431,7 +430,7 @@ class AddCustomerActivity : AppCompatActivity() {
         val selectedCompany =
             companies.getOrNull(
                 binding.spinnerCompany.selectedItemPosition
-            ) ?: companies.first()
+            ) ?: companies.firstOrNull() ?: "EBONE"
 
         db.collection(customersCollection)
             .document(customerId)
@@ -579,7 +578,7 @@ class AddCustomerActivity : AppCompatActivity() {
         val company =
             companies.getOrNull(
                 binding.spinnerCompany.selectedItemPosition
-            ) ?: companies.first()
+            ) ?: companies.firstOrNull() ?: "EBONE"
 
         if (
             customerId.isEmpty() ||

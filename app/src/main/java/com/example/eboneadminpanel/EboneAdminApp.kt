@@ -115,6 +115,7 @@ class EboneAdminApp : Application() {
     override fun onCreate() {
         super.onCreate()
         com.google.firebase.FirebaseApp.initializeApp(this)
+        com.example.superadmin.core.AppActivityTracker.init(this)
         db = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
         createNotificationChannel()
 

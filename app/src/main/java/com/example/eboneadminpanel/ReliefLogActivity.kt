@@ -13,9 +13,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.ItemTouchHelper
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.example.superadmin.core.CompanyDataHelper
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -81,6 +83,95 @@ class ReliefLogActivity : AppCompatActivity() {
         tvEmpty = findViewById(R.id.tvLogEmpty)
         rv = findViewById(R.id.rvReliefLog)
         rv.layoutManager = LinearLayoutManager(this)
+
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
+            override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean = false
+
+            override fun getSwipeThreshold(viewHolder: RecyclerView.ViewHolder): Float = 0.8f
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                // Handled via tap on revealed delete button
+            }
+
+            override fun onChildDraw(
+                c: android.graphics.Canvas,
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                dX: Float,
+                dY: Float,
+                actionState: Int,
+                isCurrentlyActive: Boolean
+            ) {
+                val itemView = viewHolder.itemView
+                val context = recyclerView.context
+                val maxDx = -140f * context.resources.displayMetrics.density
+                val clampedDx = if (dX < maxDx) maxDx else if (dX > 0f) 0f else dX
+
+                if (clampedDx < 0f) {
+                    val paint = android.graphics.Paint().apply {
+                        color = Color.parseColor("#DC2626") // Red background
+                    }
+                    c.drawRect(
+                        itemView.right.toFloat() + clampedDx,
+                        itemView.top.toFloat(),
+                        itemView.right.toFloat(),
+                        itemView.bottom.toFloat(),
+                        paint
+                    )
+
+                    val textPaint = android.text.TextPaint().apply {
+                        color = Color.WHITE
+                        textSize = 42f
+                        isAntiAlias = true
+                        textAlign = android.graphics.Paint.Align.CENTER
+                    }
+                    val textX = itemView.right.toFloat() + (clampedDx / 2f)
+                    val textY = itemView.top.toFloat() + (itemView.height.toFloat() / 2f) + 15f
+                    c.drawText("🗑️ Delete", textX, textY, textPaint)
+                }
+
+                super.onChildDraw(c, recyclerView, viewHolder, clampedDx, dY, actionState, isCurrentlyActive)
+            }
+        })
+        itemTouchHelper.attachToRecyclerView(rv)
+
+        rv.setOnTouchListener { _, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                val x = event.x
+                val y = event.y
+                for (i in 0 until rv.childCount) {
+                    val child = rv.getChildAt(i)
+                    val holder = rv.getChildViewHolder(child)
+                    val translationX = child.translationX
+                    if (translationX < -30f) {
+                        val deleteButtonLeft = child.right.toFloat() + translationX
+                        val deleteButtonRight = child.right.toFloat()
+                        val top = child.top.toFloat()
+                        val bottom = child.bottom.toFloat()
+
+                        if (x >= deleteButtonLeft && x <= deleteButtonRight && y >= top && y <= bottom) {
+                            val position = holder.bindingAdapterPosition
+                            val adapter = rv.adapter as? LogAdapter
+                            val doc = adapter?.getItemAt(position)
+                            if (doc != null) {
+                                db.collection("reliefLogs").document(doc.id)
+                                    .delete()
+                                    .addOnSuccessListener {
+                                        Toast.makeText(this@ReliefLogActivity, "Record deleted 🗑️", Toast.LENGTH_SHORT).show()
+                                        loadLogs()
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Toast.makeText(this@ReliefLogActivity, "Delete failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        loadLogs()
+                                    }
+                            }
+                            return@setOnTouchListener true
+                        }
+                    }
+                }
+            }
+            false
+        }
 
         findViewById<ImageButton>(R.id.btnLogBack).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.btnLogCalendar).setOnClickListener { openCustomRangePicker() }
@@ -338,7 +429,7 @@ class ReliefLogActivity : AppCompatActivity() {
             .orderBy("activatedAt", Query.Direction.DESCENDING)
             .get()
             .addOnSuccessListener { snapshot ->
-                lastLoadedDocs = snapshot.documents
+                lastLoadedDocs = snapshot.documents.filter { CompanyDataHelper.belongsToCurrentCompany(this, it) }
                 renderLogs()
             }
             .addOnFailureListener {
@@ -407,6 +498,8 @@ class ReliefLogActivity : AppCompatActivity() {
     private inner class LogAdapter(
         private val items: List<DocumentSnapshot>
     ) : RecyclerView.Adapter<LogAdapter.VH>() {
+
+        fun getItemAt(position: Int): DocumentSnapshot? = if (position in items.indices) items[position] else null
 
         inner class VH(view: View) : RecyclerView.ViewHolder(view) {
             val strip: View = view.findViewById(R.id.viewLogStatusStrip)

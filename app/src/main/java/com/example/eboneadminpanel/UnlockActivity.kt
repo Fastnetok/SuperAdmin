@@ -2,6 +2,7 @@ package com.example.superadmin
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
@@ -39,7 +40,11 @@ class UnlockActivity : AppCompatActivity() {
         fingerprintButton.alpha = if (canUseBiometric) 1f else 0.3f
 
         fingerprintButton.setOnClickListener {
-            if (canUseBiometric) showBiometricPrompt()
+            if (canUseBiometric) {
+                showBiometricPrompt()
+            } else {
+                showPinFallback()
+            }
         }
 
         unlockButton.setOnClickListener {
@@ -58,8 +63,20 @@ class UnlockActivity : AppCompatActivity() {
             finish()
         }
 
-        // Try biometric automatically as soon as the screen opens
-        if (canUseBiometric) showBiometricPrompt()
+        // Try biometric automatically as soon as the screen opens without showing PIN
+        if (canUseBiometric) {
+            statusText.text = "Biometric verify ho raha hai..."
+            showBiometricPrompt()
+        } else {
+            showPinFallback()
+        }
+    }
+
+    private fun showPinFallback() {
+        unlockPinInput.visibility = View.VISIBLE
+        unlockButton.visibility = View.VISIBLE
+        logoutButton.visibility = View.VISIBLE
+        statusText.text = "Biometric available nahi hai. PIN darج karein."
     }
 
     private fun showBiometricPrompt() {
@@ -73,8 +90,13 @@ class UnlockActivity : AppCompatActivity() {
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 super.onAuthenticationError(errorCode, errString)
-                // User cancelled or failed too many times — fall back to PIN,
-                // no need to show an error, the PIN field is already visible.
+                // If user cancels biometric or it errors, show PIN fallback
+                showPinFallback()
+            }
+
+            override fun onAuthenticationFailed() {
+                super.onAuthenticationFailed()
+                statusText.text = "Biometric match nahi hua. Dubara koshish karein."
             }
         }
 
@@ -82,7 +104,7 @@ class UnlockActivity : AppCompatActivity() {
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("SuperAdmin Unlock")
-            .setSubtitle("Fingerprint se unlock karein")
+            .setSubtitle("Fingerprint ya Face Unlock se login karein")
             .setNegativeButtonText("PIN use karein")
             .build()
 

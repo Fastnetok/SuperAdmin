@@ -241,6 +241,7 @@ class CustomerBillingActivity : AppCompatActivity() {
                 val verifiedTodayDocs = mutableListOf<DocumentSnapshot>()
 
                 for (doc in snapshot.documents) {
+                    if (!CompanyDataHelper.belongsToCurrentCompany(this@CustomerBillingActivity, doc)) continue
                     val status = stringValue(doc, "status")
                         .uppercase(Locale.getDefault())
 
@@ -286,8 +287,6 @@ class CustomerBillingActivity : AppCompatActivity() {
                 binding.tvVerifiedToday.text =
                     verifiedToday.toString()
 
-                binding.tvUnpaidPackagesToday.text =
-                    "Packages Activated: $verifiedToday"
                 // Unpaid Today is rendered from the customers collection.
                 // Transaction amounts/statuses are not used for the Relief count.
 
@@ -613,6 +612,7 @@ class CustomerBillingActivity : AppCompatActivity() {
                 binding.recentTransactionsContainer.removeAllViews()
 
                 for (doc in snapshot.documents) {
+                    if (!CompanyDataHelper.belongsToCurrentCompany(this@CustomerBillingActivity, doc)) continue
                     val customerId =
                         doc.getString("customerId") ?: "—"
                     val source =

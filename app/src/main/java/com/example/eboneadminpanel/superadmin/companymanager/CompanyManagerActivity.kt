@@ -42,7 +42,8 @@ class CompanyManagerActivity : AppCompatActivity() {
         adapter = CompanyAdapter(
             companies = emptyList(),
             onEditClick = { company -> EditCompanyDialog.show(this, company, viewModel) },
-            onTestResetClick = { company -> CompanyResetHelper.promptTestReset(this, company, viewModel) },
+            onSoftResetClick = { company -> CompanyResetHelper.promptSoftReset(this, company, viewModel) },
+            onHardResetClick = { company -> CompanyResetHelper.promptHardReset(this, company, viewModel) },
             onDeleteClick = { company -> CompanyDeleteHelper.promptSecureDelete(this, company, viewModel) }
         )
 

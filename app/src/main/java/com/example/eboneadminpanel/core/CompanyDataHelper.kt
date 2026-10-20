@@ -1,114 +1,200 @@
 package com.example.superadmin.core
 
 import android.content.Context
-import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.DocumentSnapshot
 
 object CompanyDataHelper {
 
-    fun getCurrentCompanyId(context: Context): String? {
-        val sessionManager = SessionManager(context)
-        val activeCompany = sessionManager.getActiveCompanyId()
-        if (!activeCompany.isNullOrBlank() && activeCompany.uppercase() != "ALL") {
-            return activeCompany.trim().uppercase()
+    private fun normalizeCompanyId(value: String?): String? {
+        return value
+            ?.trim()
+            ?.uppercase()
+            ?.replace("-", "")
+            ?.takeIf { it.isNotBlank() && it != "ALL" }
+    }
+
+    fun normalizeToCanonical(value: String?): String? {
+        val clean = value?.trim()?.uppercase() ?: return null
+        return when {
+            clean.contains("HAV") -> "HAV"
+            clean.contains("OKA") -> "OKA"
+            clean.contains("REN") -> "REN"
+            clean.contains("DEP") -> "DEP"
+            clean.contains("PAK") -> "PAK"
+            clean.contains("SAH") -> "SAH"
+            clean.contains("ARI") -> "ARI"
+            clean.contains("GOJ") -> "GOJ"
+            clean.contains("HUJ") -> "HUJ"
+            clean.contains("PAT") -> "PAT"
+            clean.contains("FSD") -> "FSD"
+            clean.contains("LHR") -> "LHR"
+            else -> clean.replace("-", "").replace(" ", "")
         }
-        val companyId = sessionManager.getCompanyId()
-        return companyId?.trim()?.uppercase()?.takeIf { it.isNotBlank() && it != "ALL" }
     }
 
     fun isSuperAdmin(context: Context): Boolean {
         return SessionManager(context).isSuperAdmin()
     }
 
-    fun getScopedDatabaseReference(context: Context, nodeName: String): DatabaseReference {
-        return FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").reference.child(nodeName)
+    fun getCurrentCompanyId(context: Context): String? {
+        val session = SessionManager(context)
+
+        return if (session.isSuperAdmin()) {
+            val activeCompany = session.getActiveCompanyId()
+
+            if (activeCompany?.trim()?.equals(
+                    "ALL",
+                    ignoreCase = true
+                ) == true
+            ) {
+                null
+            } else {
+                normalizeCompanyId(activeCompany) ?: "OKA001"
+            }
+        } else {
+            normalizeCompanyId(session.getCompanyId()) ?: "OKA001"
+        }
     }
 
-    fun belongsToCurrentCompany(context: Context, snapshot: DataSnapshot): Boolean {
+    private fun isViewingAllCompanies(context: Context): Boolean {
+        val session = SessionManager(context)
+
+        return session.isSuperAdmin() &&
+            session.getActiveCompanyId()
+                ?.trim()
+                ?.equals("ALL", ignoreCase = true) == true
+    }
+
+    private fun matchesCompany(
+        context: Context,
+        snapshot: DataSnapshot,
+        parentCompanyId: String?
+    ): Boolean {
+        if (isViewingAllCompanies(context)) {
+            return true
+        }
+
+        val targetRaw = getCurrentCompanyId(context) ?: "OKA001"
+        val targetCanonical = normalizeToCanonical(targetRaw) ?: "OKA"
+
+        val key = snapshot.key?.trim()?.uppercase() ?: ""
+        val itemCompanyId = snapshot.child("companyId").getValue(String::class.java)
+            ?: snapshot.child("company").getValue(String::class.java)
+            ?: snapshot.child("companyName").getValue(String::class.java)
+            ?: snapshot.child("companyCode").getValue(String::class.java)
+            ?: snapshot.child("zone").getValue(String::class.java)
+
+        val recordCompanyRaw = itemCompanyId ?: parentCompanyId
+        val recordCanonical = normalizeToCanonical(recordCompanyRaw)
+
+        // BRILLIANT PREFIX RULE: Check if employee key/ID starts with franchise prefix (e.g. DEP, OKA, HAV, REN, GOJ, HUJ, PAT)
+        val prefixCanonical = when {
+            key.startsWith("DEP") -> "DEP"
+            key.startsWith("OKA") -> "OKA"
+            key.startsWith("HAV") -> "HAV"
+            key.startsWith("REN") -> "REN"
+            key.startsWith("PAK") -> "PAK"
+            key.startsWith("SAH") -> "SAH"
+            key.startsWith("ARI") -> "ARI"
+            key.startsWith("GOJ") -> "GOJ"
+            key.startsWith("HUJ") -> "HUJ"
+            key.startsWith("PAT") -> "PAT"
+            key.startsWith("FSD") -> "FSD"
+            key.startsWith("LHR") -> "LHR"
+            else -> null
+        }
+
+        val effectiveCanonical = prefixCanonical ?: recordCanonical
+
+        if (effectiveCanonical != null) {
+            val matches = effectiveCanonical == targetCanonical
+            android.util.Log.d("CompanyMatch", "Prefix/Strict Check: record=${snapshot.key}, prefixCan=$prefixCanonical, recordCan=$recordCanonical, targetCan=$targetCanonical, match=$matches")
+            return matches
+        }
+
+        // If record has no tags, return false if viewing a specific target company other than default
+        return false
+    }
+
+    private fun matchesCompany(
+        context: Context,
+        itemCompanyId: String?
+    ): Boolean {
+        if (isViewingAllCompanies(context)) {
+            return true
+        }
+
+        val targetRaw = getCurrentCompanyId(context) ?: "OKA001"
+        val targetCanonical = normalizeToCanonical(targetRaw) ?: "OKA"
+        val recordCanonical = normalizeToCanonical(itemCompanyId) ?: return false
+
+        return recordCanonical == targetCanonical
+    }
+
+    fun getScopedDatabaseReference(
+        context: Context,
+        nodeName: String
+    ): DatabaseReference {
+        return FirebaseDatabase.getInstance(
+            "https://superadmin-9a853-default-rtdb.firebaseio.com"
+        ).reference.child(nodeName)
+    }
+
+    fun belongsToCurrentCompany(
+        context: Context,
+        snapshot: DataSnapshot
+    ): Boolean {
         return belongsToCurrentCompany(context, snapshot, null)
     }
 
-    fun belongsToCurrentCompany(context: Context, snapshot: DataSnapshot, parentCompanyId: String?): Boolean {
-        val sessionManager = SessionManager(context)
-        val isSuper = sessionManager.isSuperAdmin()
-        val userCompanyId = sessionManager.getCompanyId()?.trim()?.uppercase()
-        val activeCompany = sessionManager.getActiveCompanyId()?.trim()?.uppercase()
+    fun belongsToCurrentCompany(
+        context: Context,
+        snapshot: DataSnapshot,
+        parentCompanyId: String?
+    ): Boolean {
+        return matchesCompany(context, snapshot, parentCompanyId)
+    }
 
-        val targetFilter = if (!isSuper) {
-            userCompanyId?.takeIf { it.isNotBlank() && it != "ALL" } ?: ""
-        } else {
-            if (activeCompany.isNullOrEmpty() || activeCompany == "ALL") null else activeCompany
-        }
+    fun belongsToCurrentCompany(
+        context: Context,
+        doc: DocumentSnapshot
+    ): Boolean {
+        val itemCompanyId = doc.getString("companyId")
+            ?: doc.getString("company")
+            ?: doc.getString("companyName")
+            ?: doc.getString("companyCode")
+            ?: doc.getString("zone")
+        return matchesCompany(context, itemCompanyId)
+    }
 
-        if (targetFilter.isNullOrEmpty()) {
-            return true
-        }
+    fun getCanonicalDocId(input: String): String {
+        val clean = input.trim().uppercase()
 
-        val itemCompanyId = snapshot.child("companyId").getValue(String::class.java)?.trim()?.uppercase().orEmpty()
-        val itemCompany = snapshot.child("company").getValue(String::class.java)?.trim()?.uppercase().orEmpty()
-        val itemCompanyName = snapshot.child("companyName").getValue(String::class.java)?.trim()?.uppercase().orEmpty()
-        val itemCompanyCode = snapshot.child("companyCode").getValue(String::class.java)?.trim()?.uppercase().orEmpty()
-        val itemZone = snapshot.child("zone").getValue(String::class.java)?.trim()?.uppercase().orEmpty()
-
-        val allFields = listOf(itemCompanyId, itemCompany, itemCompanyName, itemCompanyCode, itemZone).filter { it.isNotBlank() }
-        val cleanTarget = targetFilter.replace("-", "").uppercase()
-        val baseTarget = cleanTarget.split(" ", "-", "_").firstOrNull() ?: cleanTarget
-
-        if (allFields.isEmpty()) {
-            return cleanTarget.equals("OKARA", ignoreCase = true) || cleanTarget.equals("DEFAULT", ignoreCase = true) || cleanTarget.startsWith("OKA")
-        }
-
-        return allFields.any { field ->
-            val cleanField = field.replace("-", "").uppercase()
-            val baseField = cleanField.split(" ", "-", "_").firstOrNull() ?: cleanField
-
-            cleanField == cleanTarget || 
-            baseField == baseTarget ||
-            (baseTarget.length >= 3 && cleanField.contains(baseTarget)) ||
-            (baseField.length >= 3 && baseTarget.contains(cleanField))
+        return when {
+            clean.contains("REN") -> "RENALA"
+            clean.contains("DEP") -> "DEPALPUR"
+            clean.contains("OKA") -> "OKARA"
+            clean.contains("PAK") -> "PAKPATTAN"
+            clean.contains("SAH") -> "SAHIWAL"
+            clean.contains("ARI") -> "ARIFWALA"
+            clean.contains("GOJ") -> "GOJRA"
+            clean.contains("HUJ") -> "HUJRA"
+            clean.contains("PAT") -> "PATTOKI"
+            else -> clean
         }
     }
 
-    fun belongsToCurrentCompany(context: Context, doc: DocumentSnapshot): Boolean {
-        val sessionManager = SessionManager(context)
-        val isSuper = sessionManager.isSuperAdmin()
-        val userCompanyId = sessionManager.getCompanyId()?.trim()?.uppercase()
-        val activeCompany = sessionManager.getActiveCompanyId()?.trim()?.uppercase()
-
-        val targetFilter = if (!isSuper) {
-            userCompanyId?.takeIf { it.isNotBlank() && it != "ALL" } ?: ""
-        } else {
-            if (activeCompany.isNullOrEmpty() || activeCompany == "ALL") null else activeCompany
-        }
-
-        if (targetFilter.isNullOrEmpty()) {
-            return true
-        }
-
-        val itemCompanyId = doc.getString("companyId")?.trim()?.uppercase().orEmpty()
-        val itemCompany = doc.getString("company")?.trim()?.uppercase().orEmpty()
-        val itemCompanyName = doc.getString("companyName")?.trim()?.uppercase().orEmpty()
-        val itemCompanyCode = doc.getString("companyCode")?.trim()?.uppercase().orEmpty()
-        val itemZone = doc.getString("zone")?.trim()?.uppercase().orEmpty()
-
-        val allFields = listOf(itemCompanyId, itemCompany, itemCompanyName, itemCompanyCode, itemZone).filter { it.isNotBlank() }
-        val cleanTarget = targetFilter.replace("-", "").uppercase()
-        val baseTarget = cleanTarget.split(" ", "-", "_").firstOrNull() ?: cleanTarget
-
-        if (allFields.isEmpty()) {
-            return cleanTarget.equals("OKARA", ignoreCase = true) || cleanTarget.equals("DEFAULT", ignoreCase = true) || cleanTarget.startsWith("OKA")
-        }
-
-        return allFields.any { field ->
-            val cleanField = field.replace("-", "").uppercase()
-            val baseField = cleanField.split(" ", "-", "_").firstOrNull() ?: cleanField
-
-            cleanField == cleanTarget || 
-            baseField == baseTarget ||
-            (baseTarget.length >= 3 && cleanField.contains(baseTarget)) ||
-            (baseField.length >= 3 && baseTarget.contains(cleanField))
-        }
+    fun isValidCompanyId(id: String?): Boolean {
+        if (id.isNullOrBlank()) return false
+        val clean = id.trim().uppercase()
+        if (clean == "ALL" || clean == "ALL COMPANIES") return true
+        // Exclude personal names or non-standard strings like RANA, NAEEM, plain city names without license numbers
+        val invalidNames = setOf("RANA", "NAEEM", "TEST", "ADMIN", "USER", "GOJRA", "PATTOKI", "OKARA", "DEPALPUR", "SAHIWAL", "PAKPATTAN", "ARIFWALA", "RENALA", "HUJRA", "LAHORE")
+        if (invalidNames.contains(clean)) return false
+        // Valid if it contains a hyphen (e.g. DEP-001) or matches standard prefix + digits (e.g. OKA001, DEP001)
+        return clean.contains("-") || clean.matches(Regex("^[A-Z]{3}\\d+$"))
     }
 }

@@ -16,6 +16,7 @@ object AppFeatures {
         "SMS Match Settings",
         "Dealer Panel",
         "Auto Complaint Monitor",
+        "Dealer Webview",
         "Settings",
         "Logout"
     )

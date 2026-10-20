@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#FFFFFF"
+    android:elevation="1dp"
+    android:layout_marginBottom="8dp"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvLogAdminName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Admin Name"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#0D2E5C"/>
+
+        <TextView
+            android:id="@+id/tvLogHeartbeat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="● Online"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#2E7D32"
+            android:layout_marginEnd="8dp"/>
+
+        <TextView
+            android:id="@+id/tvLogRoleBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ADMIN"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="#1976D2"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"/>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvLogCompany"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Company: Okara · email@domain.com"
+        android:textSize="13sp"
+        android:textColor="#555555"
+        android:layout_marginTop="4dp"/>
+
+    <!-- Usage Monitoring / Expiry Details -->
+    <TextView
+        android:id="@+id/tvLoginLogoutInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Login: 09:00 AM · Logout: 05:00 PM · Session: 8h 0m"
+        android:textSize="12sp"
+        android:textColor="#333333"
+        android:layout_marginTop="6dp"/>
+
+    <!-- Daily Usage Minutes / Notification status -->
+    <TextView
+        android:id="@+id/tvDailyUsageMinutes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Daily Usage: 240 mins today"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:textColor="#0288D1"
+        android:layout_marginTop="2dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvLogUsageCount"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Usage: 45 actions"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#2E7D32"/>
+
+        <TextView
+            android:id="@+id/tvLogLastActive"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Last Active: Today 10:45 AM"
+            android:textSize="12sp"
+            android:textColor="#757575"/>
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/progressUsage"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="6dp"
+        android:layout_marginTop="8dp"
+        android:progress="60"
+        android:progressTint="#1976D2"
+        android:background="#E0E0E0"/>
+
+    <Button
+        android:id="@+id/btnRenewLicense"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="40dp"
+        android:layout_marginTop="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="Renew License (+30 Days)"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#2E7D32"
+        android:visibility="gone"/>
+
+</LinearLayout>

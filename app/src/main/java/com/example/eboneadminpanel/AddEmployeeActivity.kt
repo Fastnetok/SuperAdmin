@@ -13,7 +13,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
 import com.example.superadmin.databinding.ActivityAddEmployeeBinding
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -24,12 +26,12 @@ import java.util.Locale
 data class ManageItem(
     val primaryKey: String,
     val name: String,
-    val pin: String,
+    var pin: String,
     val role: String,
-    val status: String,
+    var status: String,
     val phone: String,
-    val androidId: String?,
-    val uid: String?,
+    var androidId: String?,
+    var uid: String?,
     val allKeys: Set<String>
 )
 
@@ -90,7 +92,42 @@ class AddEmployeeActivity : AppCompatActivity() {
     }
 
     private fun loadCompaniesForSpinner() {
-        val userCompanyId = CompanyDataHelper.getCurrentCompanyId(this) ?: ""
+        val sessionManager = SessionManager(this)
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
+        val isSuperAdmin = sessionManager.isSuperAdmin() || currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true
+
+        val userCompanyId = sessionManager.getCompanyId() ?: sessionManager.getActiveCompanyId() ?: CompanyDataHelper.getCurrentCompanyId(this) ?: ""
+
+        if (!isSuperAdmin) {
+            if (currentUserEmail != null) {
+                FirebaseFirestore.getInstance().collection("companies")
+                    .whereEqualTo("adminEmail", currentUserEmail)
+                    .get()
+                    .addOnSuccessListener { snap ->
+                        val doc = snap.documents.firstOrNull()
+                        val compId = doc?.getString("companyId") ?: doc?.id ?: userCompanyId.ifBlank { "DEP-002" }
+                        sessionManager.saveSession(FirebaseAuth.getInstance().currentUser?.uid ?: "", "company_admin", compId)
+                        availableCompanies.clear()
+                        availableCompanies.add(CompanyRef(compId, compId))
+                        setupCompanySpinnerAdapter(compId)
+                        binding.spinnerCompany.isEnabled = false
+                    }
+                    .addOnFailureListener {
+                        availableCompanies.clear()
+                        val compToUse = if (userCompanyId.isNotBlank() && userCompanyId != "OKA001") userCompanyId else "DEP-002"
+                        availableCompanies.add(CompanyRef(compToUse, compToUse))
+                        setupCompanySpinnerAdapter(compToUse)
+                        binding.spinnerCompany.isEnabled = false
+                    }
+            } else {
+                availableCompanies.clear()
+                val compToUse = if (userCompanyId.isNotBlank() && userCompanyId != "OKA001") userCompanyId else "DEP-002"
+                availableCompanies.add(CompanyRef(compToUse, compToUse))
+                setupCompanySpinnerAdapter(compToUse)
+                binding.spinnerCompany.isEnabled = false
+            }
+            return
+        }
 
         FirebaseFirestore.getInstance().collection("companies").get().addOnSuccessListener { snapshot ->
             availableCompanies.clear()
@@ -132,10 +169,17 @@ class AddEmployeeActivity : AppCompatActivity() {
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, companyNames)
         binding.spinnerCompany.adapter = adapter
 
-        if (userCompanyId.isNotBlank()) {
-            val idx = availableCompanies.indexOfFirst { it.id.equals(userCompanyId, ignoreCase = true) || it.name.equals(userCompanyId, ignoreCase = true) }
+        val cleanUserComp = userCompanyId.replace("-", "").uppercase()
+        if (cleanUserComp.isNotBlank()) {
+            val idx = availableCompanies.indexOfFirst { 
+                it.id.replace("-", "").uppercase() == cleanUserComp || 
+                it.name.replace("-", "").uppercase() == cleanUserComp ||
+                it.id.equals(userCompanyId, true) 
+            }
             if (idx >= 0) {
                 binding.spinnerCompany.setSelection(idx)
+            } else if (availableCompanies.isNotEmpty()) {
+                binding.spinnerCompany.setSelection(0)
             }
         }
     }
@@ -168,43 +212,69 @@ class AddEmployeeActivity : AppCompatActivity() {
         val pinRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("employeePins") else db.getReference("employeePins")
         val appRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("ApprovedDevices") else db.getReference("ApprovedDevices")
 
-        // Check for existing name within this specific company to avoid duplicates
+        val cleanPhoneInput = phoneNumber.replace("+", "").replace("-", "").replace(" ", "")
+        val formattedPhoneInput = if (cleanPhoneInput.startsWith("0")) "+92" + cleanPhoneInput.substring(1) else if (!cleanPhoneInput.startsWith("92")) "+92$cleanPhoneInput" else "+$cleanPhoneInput"
+        val rawPhoneInput = if (cleanPhoneInput.startsWith("0")) cleanPhoneInput.substring(1) else if (cleanPhoneInput.startsWith("92")) cleanPhoneInput.substring(2) else cleanPhoneInput
+
+        // Check for existing name, phone, or PIN within this specific company to avoid duplicates
         empRef.get().addOnSuccessListener { empSnap ->
             pinRef.get().addOnSuccessListener { pinSnap ->
                 appRef.get().addOnSuccessListener { appSnap ->
-                    var nameExists = false
+                    var duplicateReason = ""
 
-                    fun isMatching(child: DataSnapshot): Boolean {
+                    fun checkDuplicate(child: DataSnapshot): String? {
                         val name = child.child("employeeName").getValue(String::class.java)
                             ?: child.child("name").getValue(String::class.java)
-                        if (name == null || !name.equals(employeeName, ignoreCase = true)) return false
+                        val phone = child.child("phoneNumber").getValue(String::class.java)
+                            ?: child.child("mobileNumber").getValue(String::class.java)
+                            ?: child.child("phone").getValue(String::class.java)
+                        val pin = child.child("pin").getValue(String::class.java)
+                            ?: child.child("attendancePin").getValue(String::class.java)
+
+                        val isNameMatch = name != null && name.equals(employeeName, ignoreCase = true)
+                        val isPhoneMatch = phone != null && phone.isNotBlank() &&
+                                (phone == phoneNumber || phone == cleanPhoneInput || phone == formattedPhoneInput || phone == rawPhoneInput)
+                        val isPinMatch = pin != null && pin.isNotBlank() && pin == currentPin
+
+                        if (!isNameMatch && !isPhoneMatch && !isPinMatch) return null
 
                         val itemCompId = child.child("companyId").getValue(String::class.java)
                             ?: child.child("company").getValue(String::class.java)
                             ?: child.child("companyName").getValue(String::class.java)
 
-                        if (itemCompId.isNullOrEmpty() || companyId == "DEFAULT") return true
-                        return itemCompId.equals(companyId, true) || itemCompId.equals(companyName, true) || itemCompId.equals(cleanCompId, true)
+                        val matchesCompany = if (itemCompId.isNullOrEmpty() || companyId == "DEFAULT") true
+                        else itemCompId.equals(companyId, true) || itemCompId.equals(companyName, true) || itemCompId.equals(cleanCompId, true)
+
+                        if (!matchesCompany) return null
+
+                        return when {
+                            isNameMatch -> "Name \"$employeeName\""
+                            isPhoneMatch -> "Phone Number \"$phoneNumber\""
+                            else -> "PIN \"$currentPin\""
+                        }
                     }
 
                     for (child in empSnap.children) {
-                        if (isMatching(child)) { nameExists = true; break }
+                        val match = checkDuplicate(child)
+                        if (match != null) { duplicateReason = match; break }
                     }
-                    if (!nameExists) {
+                    if (duplicateReason.isEmpty()) {
                         for (child in pinSnap.children) {
-                            if (isMatching(child)) { nameExists = true; break }
+                            val match = checkDuplicate(child)
+                            if (match != null) { duplicateReason = match; break }
                         }
                     }
-                    if (!nameExists) {
+                    if (duplicateReason.isEmpty()) {
                         for (child in appSnap.children) {
-                            if (isMatching(child)) { nameExists = true; break }
+                            val match = checkDuplicate(child)
+                            if (match != null) { duplicateReason = match; break }
                         }
                     }
 
-                    if (nameExists) {
+                    if (duplicateReason.isNotEmpty()) {
                         showResult(
-                            "❌ Employee \"$employeeName\" already exists for this company!\n" +
-                                    "If their mobile is changed or lost, please use 'Reset PIN' in Manage Employees instead of creating a duplicate entry.",
+                            "❌ Duplicate Employee Error: An employee with $duplicateReason already exists for Company '$companyName' ($companyId)!\n\n" +
+                                    "💡 Note: If the employee lost or changed their mobile device, please use 'Reset PIN' in Manage Employees instead of creating a duplicate entry.",
                             isError = true
                         )
                         binding.btnSaveEmployee.isEnabled = true
@@ -250,7 +320,8 @@ class AddEmployeeActivity : AppCompatActivity() {
                                 "companyId" to companyId,
                                 "company" to companyName,
                                 "companyName" to companyName,
-                                "companyCode" to companyId
+                                "companyCode" to companyId,
+                                "zone" to companyId
                             )
 
                             val approvedData = data.toMutableMap().apply {
@@ -462,18 +533,26 @@ class AddEmployeeActivity : AppCompatActivity() {
                                             }
                                         }
 
+                                        // 1. Parse device approvals and employee nodes first
                                         for (child in appSnap.children) parseChild(child, "Approved")
                                         for (child in empSnap.children) parseChild(child, "Approved")
-                                        for (child in pinSnap.children) parseChild(child, "PENDING")
 
                                         for (cSnap in companiesSnap.children) {
                                             val compKey = cSnap.key ?: continue
                                             val cEmps = cSnap.child("employees")
-                                            val cPins = cSnap.child("employeePins")
                                             val cApps = cSnap.child("ApprovedDevices")
 
                                             for (child in cApps.children) parseChild(child, "Approved", compKey)
                                             for (child in cEmps.children) parseChild(child, "Approved", compKey)
+                                        }
+
+                                        // 2. LAST: Parse employeePins so generated PINs override any old employee records
+                                        for (child in pinSnap.children) parseChild(child, "PENDING")
+
+                                        for (cSnap in companiesSnap.children) {
+                                            val compKey = cSnap.key ?: continue
+                                            val cPins = cSnap.child("employeePins")
+
                                             for (child in cPins.children) parseChild(child, "PENDING", compKey)
                                         }
 
@@ -569,6 +648,7 @@ class AddEmployeeActivity : AppCompatActivity() {
             tvDevice.text = devInfoText
 
             val resetPinBtn = row.findViewById<Button>(R.id.btnRowResetPin)
+            val deregisterBtn = row.findViewById<Button>(R.id.btnRowDeregister)
             val blockBtn = row.findViewById<Button>(R.id.btnRowBlock)
             val deleteBtn = row.findViewById<Button>(R.id.btnRowDelete)
 
@@ -576,6 +656,10 @@ class AddEmployeeActivity : AppCompatActivity() {
 
             resetPinBtn.setOnClickListener {
                 resetEmployeePin(item)
+            }
+
+            deregisterBtn.setOnClickListener {
+                deregisterEmployeeDevice(item)
             }
 
             blockBtn.setOnClickListener {
@@ -590,7 +674,197 @@ class AddEmployeeActivity : AppCompatActivity() {
         }
     }
 
+    private fun deregisterEmployeeDevice(item: ManageItem) {
+        val oldPin = item.pin
+        val oldAndroidId = item.androidId
+        val oldUid = item.uid
+        val newPin = (100000..999999).random().toString()
+
+        AlertDialog.Builder(this)
+            .setTitle("Deregister Device & Reset PIN — ${item.name}")
+            .setMessage(
+                "Deregister device and reset PIN for ${item.name} (${item.phone})?\n\n" +
+                        "• The employee's current phone will be immediately unlinked and logged out in real-time.\n" +
+                        "• Old PIN ($oldPin) will be destroyed.\n" +
+                        "• NEW Registration PIN ($newPin) will be assigned immediately.\n" +
+                        "• All attendance, GPS movement tracking, fuel logs, and complaints remain 100% saved in Firebase.\n\n" +
+                        "Proceed with Deregistration & PIN Change?"
+            )
+            .setPositiveButton("Deregister & Change PIN") { _, _ ->
+                val selectedComp = availableCompanies.getOrNull(binding.spinnerCompany.selectedItemPosition)
+                    ?: availableCompanies.firstOrNull()
+                    ?: CompanyRef("DEFAULT", "Default Company")
+                val companyId = selectedComp.id
+                val companyName = selectedComp.name
+                val cleanCompId = companyId.replace("-", "")
+
+                val pathsToUpdate = mutableSetOf<String>()
+                if (companyId.isNotBlank() && companyId != "DEFAULT") pathsToUpdate.add(companyId)
+                if (companyName.isNotBlank() && companyName != "DEFAULT") pathsToUpdate.add(companyName)
+                if (cleanCompId.isNotBlank() && cleanCompId != "DEFAULT") pathsToUpdate.add(cleanCompId)
+
+                val cleanPhone = item.phone.replace("+", "").replace("-", "").replace(" ", "")
+                val formattedPhone = if (cleanPhone.startsWith("0")) "+92" + cleanPhone.substring(1) else if (!cleanPhone.startsWith("92")) "+92$cleanPhone" else "+$cleanPhone"
+                val rawPhoneWithoutZero = if (cleanPhone.startsWith("0")) cleanPhone.substring(1) else if (cleanPhone.startsWith("92")) cleanPhone.substring(2) else cleanPhone
+
+                // 1. Gather all target keys to revoke BEFORE mutating in-memory item
+                val allDeviceKeysToRevoke = mutableSetOf<String>()
+                allDeviceKeysToRevoke.addAll(item.allKeys)
+                if (!oldAndroidId.isNullOrBlank()) allDeviceKeysToRevoke.add(oldAndroidId)
+                if (!oldUid.isNullOrBlank()) allDeviceKeysToRevoke.add(oldUid)
+                if (item.phone.isNotBlank()) allDeviceKeysToRevoke.add(item.phone)
+                if (cleanPhone.isNotBlank()) allDeviceKeysToRevoke.add(cleanPhone)
+                if (formattedPhone.isNotBlank()) allDeviceKeysToRevoke.add(formattedPhone)
+                if (rawPhoneWithoutZero.isNotBlank()) allDeviceKeysToRevoke.add(rawPhoneWithoutZero)
+                if (oldPin.isNotBlank()) allDeviceKeysToRevoke.add(oldPin)
+
+                // 2. Instantly update in-memory object & re-render UI list so row PIN updates immediately!
+                item.pin = newPin
+                item.status = "Deregistered"
+                item.androidId = null
+                item.uid = null
+                filterAndRenderManageList(binding.etSearchEmployee.text.toString().trim())
+
+                // 3. First broadcast explicit REVOKED status update so real-time listeners on employee phone fire auto-logout
+                val revocationSignal = mapOf<String, Any?>(
+                    "status" to "Deregistered",
+                    "deviceStatus" to "REVOKED",
+                    "sessionStatus" to "LOGOUT",
+                    "isOnline" to false,
+                    "lastUpdate" to System.currentTimeMillis()
+                )
+
+                for (devKey in allDeviceKeysToRevoke) {
+                    db.getReference("ApprovedDevices").child(devKey).updateChildren(revocationSignal)
+                    for (path in pathsToUpdate) {
+                        db.getReference("companies").child(path).child("ApprovedDevices").child(devKey).updateChildren(revocationSignal)
+                    }
+                }
+
+                // 4. Remove device approval nodes and old PIN nodes
+                for (devKey in allDeviceKeysToRevoke) {
+                    db.getReference("ApprovedDevices").child(devKey).removeValue()
+                    for (path in pathsToUpdate) {
+                        db.getReference("companies").child(path).child("ApprovedDevices").child(devKey).removeValue()
+                    }
+                }
+
+                if (oldPin.isNotBlank()) {
+                    db.getReference("employeePins").child(oldPin).removeValue()
+                    db.getReference("employees").child(oldPin).removeValue()
+                    for (path in pathsToUpdate) {
+                        db.getReference("companies").child(path).child("employeePins").child(oldPin).removeValue()
+                        db.getReference("companies").child(path).child("employees").child(oldPin).removeValue()
+                    }
+                }
+
+                // 3. Update employee records with new PIN & Deregistered status
+                val deregisteredMap = mapOf<String, Any?>(
+                    "status" to "Deregistered",
+                    "deviceStatus" to "REVOKED",
+                    "sessionStatus" to "LOGOUT",
+                    "pin" to newPin,
+                    "attendancePin" to newPin,
+                    "registrationPin" to newPin,
+                    "linkedAndroidId" to null,
+                    "androidId" to null,
+                    "linkedUid" to null,
+                    "uid" to null
+                )
+
+                for (key in item.allKeys) {
+                    db.getReference("employees").child(key).updateChildren(deregisteredMap)
+                    for (path in pathsToUpdate) {
+                        db.getReference("companies").child(path).child("employees").child(key).updateChildren(deregisteredMap)
+                    }
+                }
+
+                // 4. Save new PIN node in employeePins
+                val newPinData = mapOf<String, Any>(
+                    "employeeName" to item.name,
+                    "name" to item.name,
+                    "phoneNumber" to item.phone,
+                    "mobileNumber" to item.phone,
+                    "phone" to item.phone,
+                    "formattedPhone" to formattedPhone,
+                    "cleanPhone" to cleanPhone,
+                    "rawPhone" to rawPhoneWithoutZero,
+                    "pin" to newPin,
+                    "attendancePin" to newPin,
+                    "registrationPin" to newPin,
+                    "role" to item.role,
+                    "status" to "PENDING",
+                    "createdAt" to System.currentTimeMillis(),
+                    "companyId" to companyId,
+                    "company" to companyName,
+                    "companyName" to companyName,
+                    "companyCode" to companyId
+                )
+
+                db.getReference("employeePins").child(newPin).setValue(newPinData)
+                for (path in pathsToUpdate) {
+                    db.getReference("companies").child(path).child("employeePins").child(newPin).setValue(newPinData)
+                }
+
+                // 5. Sync to Firestore
+                val firestore = FirebaseFirestore.getInstance()
+                for (devKey in allDeviceKeysToRevoke) {
+                    firestore.collection("ApprovedDevices").document(devKey).delete()
+                    for (path in pathsToUpdate) {
+                        firestore.collection("companies").document(path).collection("ApprovedDevices").document(devKey).delete()
+                    }
+                }
+
+                for (key in item.allKeys) {
+                    firestore.collection("employees").document(key).update(
+                        mapOf(
+                            "status" to "Deregistered",
+                            "pin" to newPin,
+                            "linkedAndroidId" to null,
+                            "linkedUid" to null
+                        )
+                    )
+                }
+
+                // 6. Log Admin Event
+                val logData = mapOf<String, Any>(
+                    "title" to "📱 App Unlinked & PIN Reset",
+                    "message" to "Device for ${item.name} (${item.phone}) was unlinked in real-time. New PIN: $newPin.",
+                    "employeeName" to item.name,
+                    "phone" to item.phone,
+                    "newPin" to newPin,
+                    "companyId" to companyId,
+                    "companyName" to companyName,
+                    "timestamp" to System.currentTimeMillis()
+                )
+                db.getReference("adminNotifications").push().setValue(logData)
+                if (companyId.isNotBlank() && companyId != "DEFAULT") {
+                    db.getReference("companies").child(companyId).child("companyLogs").push().setValue(logData)
+                }
+
+                AlertDialog.Builder(this)
+                    .setTitle("✅ Device Unlinked & PIN Changed")
+                    .setMessage(
+                        "Deregistered successfully!\n\n" +
+                                "👤 Employee: ${item.name}\n" +
+                                "📱 Phone: ${item.phone}\n\n" +
+                                "🔑 NEW REGISTRATION PIN: $newPin\n\n" +
+                                "• The old phone has been logged out in real-time.\n" +
+                                "• Employee PIN on screen updated to $newPin."
+                    )
+                    .setPositiveButton("OK", null)
+                    .show()
+
+                if (isManageListVisible) loadManageList()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun resetEmployeePin(item: ManageItem) {
+        val oldPin = item.pin
+        val oldAndroidId = item.androidId
+        val oldUid = item.uid
         val newPin = (100000..999999).random().toString()
 
         AlertDialog.Builder(this)
@@ -613,6 +887,29 @@ class AddEmployeeActivity : AppCompatActivity() {
                 val cleanPhone = item.phone.replace("+", "").replace("-", "").replace(" ", "")
                 val formattedPhone = if (cleanPhone.startsWith("0")) "+92" + cleanPhone.substring(1) else if (!cleanPhone.startsWith("92")) "+92$cleanPhone" else "+$cleanPhone"
                 val rawPhoneWithoutZero = if (cleanPhone.startsWith("0")) cleanPhone.substring(1) else if (cleanPhone.startsWith("92")) cleanPhone.substring(2) else cleanPhone
+
+                val pathsToUpdate = mutableSetOf<String>()
+                if (companyId.isNotBlank() && companyId != "DEFAULT") pathsToUpdate.add(companyId)
+                if (companyName.isNotBlank() && companyName != "DEFAULT") pathsToUpdate.add(companyName)
+                if (cleanCompId.isNotBlank() && cleanCompId != "DEFAULT") pathsToUpdate.add(cleanCompId)
+
+                // 1. Gather all target keys to revoke BEFORE mutating in-memory item
+                val allDeviceKeysToRevoke = mutableSetOf<String>()
+                allDeviceKeysToRevoke.addAll(item.allKeys)
+                if (!oldAndroidId.isNullOrBlank()) allDeviceKeysToRevoke.add(oldAndroidId)
+                if (!oldUid.isNullOrBlank()) allDeviceKeysToRevoke.add(oldUid)
+                if (item.phone.isNotBlank()) allDeviceKeysToRevoke.add(item.phone)
+                if (cleanPhone.isNotBlank()) allDeviceKeysToRevoke.add(cleanPhone)
+                if (formattedPhone.isNotBlank()) allDeviceKeysToRevoke.add(formattedPhone)
+                if (rawPhoneWithoutZero.isNotBlank()) allDeviceKeysToRevoke.add(rawPhoneWithoutZero)
+                if (oldPin.isNotBlank()) allDeviceKeysToRevoke.add(oldPin)
+
+                // 2. Immediately update local memory item & re-render UI list so PIN text on screen updates instantly!
+                item.pin = newPin
+                item.status = "PENDING"
+                item.androidId = null
+                item.uid = null
+                filterAndRenderManageList(binding.etSearchEmployee.text.toString().trim())
 
                 val newPinData = mapOf<String, Any>(
                     "employeeName" to item.name,
@@ -642,101 +939,105 @@ class AddEmployeeActivity : AppCompatActivity() {
                     "companyCode" to companyId
                 )
 
-                val approvedData = newPinData.toMutableMap().apply {
-                    put("status", "Approved")
-                    put("deviceStatus", "Approved")
-                    put("appStatus", "Approved")
-                }
+                // 3. First broadcast explicit REVOKED status update so real-time listeners on employee phone fire auto-logout
+                val revocationSignal = mapOf<String, Any?>(
+                    "status" to "PENDING",
+                    "deviceStatus" to "REVOKED",
+                    "sessionStatus" to "LOGOUT",
+                    "isOnline" to false,
+                    "lastUpdate" to System.currentTimeMillis()
+                )
 
-                val pathsToUpdate = mutableSetOf<String>()
-                if (companyId.isNotBlank() && companyId != "DEFAULT") pathsToUpdate.add(companyId)
-                if (companyName.isNotBlank() && companyName != "DEFAULT") pathsToUpdate.add(companyName)
-                if (cleanCompId.isNotBlank() && cleanCompId != "DEFAULT") pathsToUpdate.add(cleanCompId)
-
-                // Update and unbind all keys associated with this employee name
-                for (key in item.allKeys) {
-                    db.getReference("employees").child(key).child("linkedAndroidId").removeValue()
-                    db.getReference("employees").child(key).child("androidId").removeValue()
-                    db.getReference("employees").child(key).child("linkedUid").removeValue()
-                    db.getReference("employees").child(key).child("uid").removeValue()
-
-                    db.getReference("employeePins").child(key).child("linkedAndroidId").removeValue()
-                    db.getReference("employeePins").child(key).child("androidId").removeValue()
-                    db.getReference("employeePins").child(key).child("linkedUid").removeValue()
-                    db.getReference("employeePins").child(key).child("uid").removeValue()
-
-                    val updateMap = mapOf<String, Any>(
-                        "pin" to newPin,
-                        "attendancePin" to newPin,
-                        "registrationPin" to newPin,
-                        "status" to "PENDING"
-                    )
-                    db.getReference("employees").child(key).updateChildren(updateMap)
+                for (devKey in allDeviceKeysToRevoke) {
+                    db.getReference("ApprovedDevices").child(devKey).updateChildren(revocationSignal)
                     for (path in pathsToUpdate) {
-                        db.getReference("companies").child(path).child("employees").child(key).child("linkedAndroidId").removeValue()
-                        db.getReference("companies").child(path).child("employees").child(key).child("androidId").removeValue()
-                        db.getReference("companies").child(path).child("employees").child(key).child("linkedUid").removeValue()
-                        db.getReference("companies").child(path).child("employees").child(key).child("uid").removeValue()
-                        db.getReference("companies").child(path).child("employees").child(key).updateChildren(updateMap)
+                        db.getReference("companies").child(path).child("ApprovedDevices").child(devKey).updateChildren(revocationSignal)
                     }
                 }
 
-                val keysToSet = mutableSetOf(newPin)
-                if (item.phone.isNotBlank()) keysToSet.add(item.phone)
-                if (cleanPhone.isNotBlank()) keysToSet.add(cleanPhone)
-                if (formattedPhone.isNotBlank()) keysToSet.add(formattedPhone)
-                if (rawPhoneWithoutZero.isNotBlank()) keysToSet.add(rawPhoneWithoutZero)
+                // 4. Remove all old device approvals from ApprovedDevices (Forces immediate logout on old phone)
+                for (devKey in allDeviceKeysToRevoke) {
+                    db.getReference("ApprovedDevices").child(devKey).removeValue()
+                    for (path in pathsToUpdate) {
+                        db.getReference("companies").child(path).child("ApprovedDevices").child(devKey).removeValue()
+                    }
+                }
 
-                // Write new PIN entry
-                for (k in keysToSet) {
+                // 2. Unbind device IDs and set PENDING status in employee records
+                val pendingMap = mapOf<String, Any?>(
+                    "pin" to newPin,
+                    "attendancePin" to newPin,
+                    "registrationPin" to newPin,
+                    "status" to "PENDING",
+                    "deviceStatus" to "REVOKED",
+                    "sessionStatus" to "LOGOUT",
+                    "linkedAndroidId" to null,
+                    "androidId" to null,
+                    "linkedUid" to null,
+                    "uid" to null
+                )
+
+                for (key in item.allKeys) {
+                    db.getReference("employees").child(key).updateChildren(pendingMap)
+                    db.getReference("employeePins").child(key).updateChildren(pendingMap)
+                    for (path in pathsToUpdate) {
+                        db.getReference("companies").child(path).child("employees").child(key).updateChildren(pendingMap)
+                        db.getReference("companies").child(path).child("employeePins").child(key).updateChildren(pendingMap)
+                    }
+                }
+
+                val phoneKeysToSet = mutableSetOf(newPin)
+                if (item.phone.isNotBlank()) phoneKeysToSet.add(item.phone)
+                if (cleanPhone.isNotBlank()) phoneKeysToSet.add(cleanPhone)
+                if (formattedPhone.isNotBlank()) phoneKeysToSet.add(formattedPhone)
+                if (rawPhoneWithoutZero.isNotBlank()) phoneKeysToSet.add(rawPhoneWithoutZero)
+
+                // 3. Write new PIN entries in employeePins and employees as PENDING
+                for (k in phoneKeysToSet) {
                     db.getReference("employeePins").child(k).setValue(newPinData)
                     db.getReference("employees").child(k).setValue(newPinData)
-                    db.getReference("ApprovedDevices").child(k).setValue(approvedData)
 
                     for (path in pathsToUpdate) {
                         db.getReference("companies").child(path).child("employeePins").child(k).setValue(newPinData)
                         db.getReference("companies").child(path).child("employees").child(k).setValue(newPinData)
-                        db.getReference("companies").child(path).child("ApprovedDevices").child(k).setValue(approvedData)
                     }
                 }
 
-                // Clean up old PIN entries in employeePins
+                // 4. Clean up old PINs
                 for (key in item.allKeys) {
-                    if (key != newPin && !keysToSet.contains(key)) {
+                    if (key != newPin && !phoneKeysToSet.contains(key)) {
                         db.getReference("employeePins").child(key).removeValue()
                         for (path in pathsToUpdate) {
                             db.getReference("companies").child(path).child("employeePins").child(key).removeValue()
                         }
                     }
                 }
-                if (item.pin.isNotEmpty() && item.pin != newPin && !keysToSet.contains(item.pin)) {
+                if (item.pin.isNotEmpty() && item.pin != newPin && !phoneKeysToSet.contains(item.pin)) {
                     db.getReference("employeePins").child(item.pin).removeValue()
                     for (path in pathsToUpdate) {
                         db.getReference("companies").child(path).child("employeePins").child(item.pin).removeValue()
                     }
                 }
 
-                // Invalidate linked device in ApprovedDevices if exists
-                if (!item.androidId.isNullOrBlank()) {
-                    db.getReference("ApprovedDevices").child(item.androidId).removeValue()
+                // 5. Sync revocation & new PIN to Firestore
+                val firestore = FirebaseFirestore.getInstance()
+                for (devKey in allDeviceKeysToRevoke) {
+                    firestore.collection("ApprovedDevices").document(devKey).delete()
                     for (path in pathsToUpdate) {
-                        db.getReference("companies").child(path).child("ApprovedDevices").child(item.androidId).removeValue()
+                        firestore.collection("companies").document(path).collection("ApprovedDevices").document(devKey).delete()
                     }
                 }
 
-                // Sync to Firestore
-                val firestore = FirebaseFirestore.getInstance()
-                for (k in keysToSet) {
+                for (k in phoneKeysToSet) {
                     firestore.collection("employeePins").document(k).set(newPinData)
                     firestore.collection("employees").document(k).set(newPinData)
-                    firestore.collection("ApprovedDevices").document(k).set(approvedData)
 
                     for (path in pathsToUpdate) {
                         firestore.collection("companies").document(path).collection("employeePins").document(k).set(newPinData)
                         firestore.collection("companies").document(path).collection("employees").document(k).set(newPinData)
-                        firestore.collection("companies").document(path).collection("ApprovedDevices").document(k).set(approvedData)
                     }
                 }
+
                 for (key in item.allKeys) {
                     firestore.collection("employees").document(key).update(
                         mapOf(
@@ -780,8 +1081,9 @@ class AddEmployeeActivity : AppCompatActivity() {
                 if (item.pin.isNotEmpty()) {
                     db.getReference("employeePins").child(item.pin).child("status").setValue(newStatus)
                 }
-                if (!item.androidId.isNullOrBlank()) {
-                    db.getReference("ApprovedDevices").child(item.androidId).child("status").setValue(newStatus)
+                val devId = item.androidId
+                if (!devId.isNullOrBlank()) {
+                    db.getReference("ApprovedDevices").child(devId).child("status").setValue(newStatus)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -833,15 +1135,18 @@ class AddEmployeeActivity : AppCompatActivity() {
                         firestore.collection("companies").document(path).collection("employeePins").document(item.pin).delete()
                     }
                 }
-                if (!item.androidId.isNullOrBlank()) {
-                    db.getReference("ApprovedDevices").child(item.androidId).removeValue()
-                    firestore.collection("ApprovedDevices").document(item.androidId).delete()
+                val devId = item.androidId
+                if (!devId.isNullOrBlank()) {
+                    db.getReference("ApprovedDevices").child(devId).removeValue()
+                    firestore.collection("ApprovedDevices").document(devId).delete()
                     for (path in paths) {
-                        db.getReference("companies").child(path).child("ApprovedDevices").child(item.androidId).removeValue()
-                        firestore.collection("companies").document(path).collection("ApprovedDevices").document(item.androidId).delete()
+                        db.getReference("companies").child(path).child("ApprovedDevices").child(devId).removeValue()
+                        firestore.collection("companies").document(path).collection("ApprovedDevices").document(devId).delete()
                     }
                 }
                 Toast.makeText(this, "${item.name} deleted from active list", Toast.LENGTH_SHORT).show()
+                allManageItems.remove(item)
+                filterAndRenderManageList(binding.etSearchEmployee.text.toString().trim())
                 if (isManageListVisible) loadManageList()
             }
             .setNegativeButton("Cancel", null)

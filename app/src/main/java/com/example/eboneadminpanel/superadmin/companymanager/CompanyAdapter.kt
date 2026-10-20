@@ -12,7 +12,8 @@ import com.example.superadmin.models.Company
 class CompanyAdapter(
     private var companies: List<Company>,
     private val onEditClick: (Company) -> Unit,
-    private val onTestResetClick: (Company) -> Unit,
+    private val onSoftResetClick: (Company) -> Unit,
+    private val onHardResetClick: (Company) -> Unit,
     private val onDeleteClick: (Company) -> Unit
 ) : RecyclerView.Adapter<CompanyAdapter.CompanyViewHolder>() {
 
@@ -23,7 +24,8 @@ class CompanyAdapter(
         val tvLicenseStatus: TextView = view.findViewById(R.id.tvLicenseStatus)
         val tvLicenseLimits: TextView = view.findViewById(R.id.tvLicenseLimits)
         val btnEditCompany: Button = view.findViewById(R.id.btnEditCompany)
-        val btnTestResetCompany: Button = view.findViewById(R.id.btnTestResetCompany)
+        val btnSoftReset: Button = view.findViewById(R.id.btnSoftReset)
+        val btnHardReset: Button = view.findViewById(R.id.btnHardReset)
         val btnDeleteCompany: Button = view.findViewById(R.id.btnDeleteCompany)
     }
 
@@ -43,7 +45,8 @@ class CompanyAdapter(
 
         holder.itemView.setOnClickListener { onEditClick(company) }
         holder.btnEditCompany.setOnClickListener { onEditClick(company) }
-        holder.btnTestResetCompany.setOnClickListener { onTestResetClick(company) }
+        holder.btnSoftReset.setOnClickListener { onSoftResetClick(company) }
+        holder.btnHardReset.setOnClickListener { onHardResetClick(company) }
         holder.btnDeleteCompany.setOnClickListener { onDeleteClick(company) }
 
         holder.itemView.setOnLongClickListener {

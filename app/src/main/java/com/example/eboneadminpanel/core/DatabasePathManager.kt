@@ -11,6 +11,10 @@ object DatabasePathManager {
         return database.getReference("companies").child(companyId).child("employees")
     }
 
+    fun attendanceRef(companyId: String): DatabaseReference {
+        return database.getReference("companies").child(companyId).child("attendance")
+    }
+
     fun complaintsRef(companyId: String): DatabaseReference {
         return database.getReference("companies").child(companyId).child("complaints")
     }

@@ -78,28 +78,38 @@
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:text="Edit"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:backgroundTint="#0D47A1"
             android:textColor="#FFFFFF"
-            android:layout_marginEnd="6dp" />
+            android:layout_marginEnd="4dp" />
 
         <Button
-            android:id="@+id/btnTestResetCompany"
+            android:id="@+id/btnSoftReset"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="Test Reset"
-            android:textSize="12sp"
-            android:backgroundTint="#E65100"
+            android:text="Soft Reset"
+            android:textSize="11sp"
+            android:backgroundTint="#EF6C00"
             android:textColor="#FFFFFF"
-            android:layout_marginEnd="6dp" />
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnHardReset"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Hard Reset (00)"
+            android:textSize="11sp"
+            android:backgroundTint="#C62828"
+            android:textColor="#FFFFFF"
+            android:layout_marginEnd="4dp" />
 
         <Button
             android:id="@+id/btnDeleteCompany"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:text="Delete"
-            android:textSize="12sp"
-            android:backgroundTint="#B71C1C"
+            android:textSize="11sp"
+            android:backgroundTint="#37474F"
             android:textColor="#FFFFFF" />
 
     </LinearLayout>

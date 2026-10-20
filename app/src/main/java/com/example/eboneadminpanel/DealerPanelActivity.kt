@@ -412,15 +412,24 @@ class DealerPanelActivity : AppCompatActivity() {
 
     private fun renderDealers(query: com.google.firebase.firestore.QuerySnapshot) {
         dealerList.removeAllViews()
-        dealerCount = query.size()
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
+        val validDocs = query.documents.filter { doc ->
+            val dComp = doc.getString("companyId") ?: doc.getString("company") ?: ""
+            val dZone = doc.getString("zone") ?: ""
+            dComp.equals(currentComp, true) || dZone.equals(canonicalZone, true) || dZone.equals(currentComp, true)
+        }
+
+        dealerCount = validDocs.size
         totalBalance = 0.0
 
-        if (query.isEmpty) {
+        if (validDocs.isEmpty()) {
             dealerList.addView(emptyState("No dealers yet — tap + to add one"))
         }
 
         var index = 1
-        query.documents.forEach { document ->
+        validDocs.forEach { document ->
             val name = document.getString("name") ?: ""
             if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {
                 return@forEach
@@ -988,17 +997,38 @@ class DealerPanelActivity : AppCompatActivity() {
     // ===================== ACTIONS =====================
 
     private fun inspectEbonePanel() {
-        AlertDialog.Builder(this)
-            .setTitle("Inspect which panel?")
-            .setItems(arrayOf("Ebone", "Wateen")) { _, which ->
-                val isp = if (which == 0) "EBONE" else "WATEEN"
-                val intent = Intent(this, WebViewLoginActivity::class.java).apply {
-                    putExtra("selected_isp", isp)
-                    putExtra("debug_tap_inspector", true)
-                }
-                startActivity(intent)
+        val docRef = getFranchiseDocRef()
+        docRef.get().addOnSuccessListener { snapshot ->
+            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
+            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
+            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+            val jazzEnabled = (enabledMap?.get("JAZZ") as? Boolean) ?: false
+
+            val availablePanels = mutableListOf<Pair<String, String>>()
+            if (eboneEnabled) availablePanels.add("Ebone" to "EBONE")
+            if (wateenEnabled) availablePanels.add("Wateen" to "WATEEN")
+            if (zongEnabled) availablePanels.add("Zong" to "ZONG")
+            if (jazzEnabled) availablePanels.add("Jazz" to "JAZZ")
+
+            if (availablePanels.isEmpty()) {
+                Toast.makeText(this, "No ISP panels enabled for this franchise in City & Franchise Management", Toast.LENGTH_LONG).show()
+                return@addOnSuccessListener
             }
-            .show()
+
+            val labels = availablePanels.map { it.first }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Inspect which panel?")
+                .setItems(labels) { _, which ->
+                    val selectedIsp = availablePanels[which].second
+                    val intent = Intent(this, WebViewLoginActivity::class.java).apply {
+                        putExtra("selected_isp", selectedIsp)
+                        putExtra("debug_tap_inspector", true)
+                    }
+                    startActivity(intent)
+                }
+                .show()
+        }
     }
 
     private fun fetchWateenDealerId(targetInput: EditText, dealerName: String) {
@@ -1034,22 +1064,37 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun checkEboneBalance() {
-        AlertDialog.Builder(this)
-            .setTitle("Check balance for which panel?")
-            .setItems(arrayOf("Ebone", "Wateen", "Zong")) { _, which ->
-                val isp = when (which) { 0 -> "EBONE"; 1 -> "WATEEN"; else -> "ZONG" }
-                if (isp == "ZONG") {
-                    AlertDialog.Builder(this)
-                        .setTitle("Which zone?")
-                        .setItems(zoneNames.toTypedArray()) { _, zoneWhich ->
-                            launchCheckBalance(isp, zoneNames[zoneWhich])
-                        }
-                        .show()
-                } else {
-                    launchCheckBalance(isp, "Okara")
-                }
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
+        val docRef = getFranchiseDocRef()
+        docRef.get().addOnSuccessListener { snapshot ->
+            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
+            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
+            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+            val jazzEnabled = (enabledMap?.get("JAZZ") as? Boolean) ?: false
+
+            val availablePanels = mutableListOf<Pair<String, String>>()
+            if (eboneEnabled) availablePanels.add("Ebone" to "EBONE")
+            if (wateenEnabled) availablePanels.add("Wateen" to "WATEEN")
+            if (zongEnabled) availablePanels.add("Zong" to "ZONG")
+            if (jazzEnabled) availablePanels.add("Jazz" to "JAZZ")
+
+            if (availablePanels.isEmpty()) {
+                Toast.makeText(this, "No ISP panels enabled for this franchise in City & Franchise Management", Toast.LENGTH_LONG).show()
+                return@addOnSuccessListener
             }
-            .show()
+
+            val labels = availablePanels.map { it.first }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Check balance for which panel? ($canonicalZone)")
+                .setItems(labels) { _, which ->
+                    val isp = availablePanels[which].second
+                    launchCheckBalance(isp, canonicalZone)
+                }
+                .show()
+        }
     }
 
     private fun launchCheckBalance(isp: String, zone: String) {
@@ -1122,16 +1167,32 @@ class DealerPanelActivity : AppCompatActivity() {
 
     private fun startAutoUpdate() {
         if (isAutoUpdating) return
-        autoUpdateQueue.clear()
-        autoUpdateQueue.add("EBONE" to "Okara")
-        autoUpdateQueue.add("WATEEN" to "Okara")
-        autoUpdateQueue.add("ZONG" to "Okara")
-        autoUpdateQueue.add("ZONG" to "Renala")
-        isAutoUpdating = true
-        observeFranchiseBalances()
-        if (isBackgroundMode) showStatusNotification("Auto Update Started", "تمام پینلز کا بیلنس بیک گراؤنڈ میں اپ ڈیٹ کیا جا رہا ہے")
-        Toast.makeText(this, "Starting Auto Update...", Toast.LENGTH_SHORT).show()
-        processNextAutoUpdate()
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
+        val docRef = getFranchiseDocRef()
+        docRef.get().addOnSuccessListener { snapshot ->
+            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
+            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
+            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+
+            autoUpdateQueue.clear()
+            if (wateenEnabled) autoUpdateQueue.add("WATEEN" to canonicalZone)
+            if (eboneEnabled) autoUpdateQueue.add("EBONE" to canonicalZone)
+            if (zongEnabled) autoUpdateQueue.add("ZONG" to canonicalZone)
+
+            if (autoUpdateQueue.isEmpty()) {
+                Toast.makeText(this, "No ISP panels enabled for auto update in $canonicalZone", Toast.LENGTH_SHORT).show()
+                return@addOnSuccessListener
+            }
+
+            isAutoUpdating = true
+            observeFranchiseBalances()
+            if (isBackgroundMode) showStatusNotification("Auto Update Started", "تمام پینلز کا بیلنس بیک گراؤنڈ میں اپ ڈیٹ کیا جا رہا ہے ($canonicalZone)")
+            Toast.makeText(this, "Starting Auto Update for $canonicalZone...", Toast.LENGTH_SHORT).show()
+            processNextAutoUpdate()
+        }
     }
 
     private fun processNextAutoUpdate() {
@@ -1152,36 +1213,82 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun observeFranchiseBalances() {
+        val companyId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalId = CompanyDataHelper.getCanonicalDocId(companyId)
+
         franchiseBalancesListener = getFranchiseDocRef()
             .addSnapshotListener { snapshot, _ ->
-                if (snapshot == null || !snapshot.exists()) {
-                    franchiseBalancesRow.removeAllViews()
-                    franchiseBalancesRow.addView(emptyState("No balance data found"))
-                    franchiseBalancesRow.addView(autoUpdateChip())
-                    franchiseBalancesRow.addView(updateModeChip())
-                    return@addSnapshotListener
+                if (snapshot != null && snapshot.exists()) {
+                    processBalanceSnapshot(snapshot)
+                } else {
+                    db.collection("franchiseSettings").get().addOnSuccessListener { query ->
+                        val matchingDoc = query.documents.find { doc ->
+                            val dId = doc.id.trim().uppercase()
+                            val dCity = doc.getString("cityName")?.trim()?.uppercase().orEmpty()
+                            dId == companyId.uppercase() || dId == companyId.replace("-", "").uppercase() ||
+                            dId == canonicalId || dCity == canonicalId || dCity == companyId.uppercase()
+                        }
+                        if (matchingDoc != null && matchingDoc.exists()) {
+                            processBalanceSnapshot(matchingDoc)
+                        } else {
+                            renderEmptyBalances()
+                        }
+                    }.addOnFailureListener {
+                        renderEmptyBalances()
+                    }
                 }
-                
-                franchiseBalancesRow.removeAllViews()
-                val ebone = snapshot.getDouble("eboneBalance")
-                val wateen = snapshot.getDouble("wateenBalance")
-                val zongOkara = snapshot.getDouble("zongBalance")
-                val zongRenala = snapshot.getDouble("zongBalance_Renala")
-                
-                val eboneTh = snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0
-                val wateenTh = snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0
-                val zongOkaraTh = snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0
-                val zongRenalaTh = snapshot.getDouble("zongLowBalanceThreshold_Renala") ?: 0.0
-
-                franchiseBalancesRow.addView(franchiseBalanceChip("Ebone", ebone, orange, "EBONE", "Okara", eboneTh))
-                franchiseBalancesRow.addView(franchiseBalanceChip("Wateen", wateen, navyMid, "WATEEN", "Okara", wateenTh))
-                franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zongOkara, purple, "ZONG", "Okara", zongOkaraTh))
-                if (zongRenala != null) {
-                    franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zongRenala, Color.parseColor("#7C3AED"), "ZONG", "Renala", zongRenalaTh))
-                }
-                franchiseBalancesRow.addView(autoUpdateChip())
-                franchiseBalancesRow.addView(updateModeChip())
             }
+    }
+
+    private fun renderEmptyBalances() {
+        franchiseBalancesRow.removeAllViews()
+        franchiseBalancesRow.addView(emptyState("No balance data found"))
+        franchiseBalancesRow.addView(autoUpdateChip())
+    }
+
+    private fun processBalanceSnapshot(snapshot: DocumentSnapshot) {
+        val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+        val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
+        val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
+        val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+
+        val enabledFeatures = snapshot.get("enabledFeatures") as? Map<*, *>
+        val dealerWebviewEnabled = if (enabledFeatures != null) {
+            val key = enabledFeatures.keys.find { it.toString().trim().lowercase().contains("webview") }
+            if (key != null) (enabledFeatures[key] as? Boolean) ?: false else false
+        } else {
+            false
+        }
+        if (!dealerWebviewEnabled) {
+            isBackgroundMode = true
+        }
+
+        franchiseBalancesRow.removeAllViews()
+        val cityName = snapshot.getString("cityName")?.trim()?.takeIf { it.isNotBlank() } ?: CompanyDataHelper.getCurrentCompanyId(this) ?: "Franchise"
+
+        val ebone = snapshot.getDouble("eboneBalance")
+        val wateen = snapshot.getDouble("wateenBalance")
+        val zong = snapshot.getDouble("zongBalance")
+        
+        val eboneTh = snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0
+        val wateenTh = snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0
+        val zongTh = snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0
+
+        if (wateenEnabled) {
+            franchiseBalancesRow.addView(franchiseBalanceChip("Wateen", wateen, navyMid, "WATEEN", cityName, wateenTh))
+        }
+        if (eboneEnabled) {
+            franchiseBalancesRow.addView(franchiseBalanceChip("Ebone", ebone, orange, "EBONE", cityName, eboneTh))
+        }
+        if (zongEnabled) {
+            franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zong, purple, "ZONG", cityName, zongTh))
+        }
+        franchiseBalancesRow.addView(autoUpdateChip())
+        if (dealerWebviewEnabled) {
+            franchiseBalancesRow.addView(updateModeChip())
+        }
+
+        lastDealerQuery?.let { renderDealers(it) }
     }
 
     private fun franchiseBalanceChip(label: String, value: Double?, accent: Int, isp: String = "", zone: String = "Okara", threshold: Double? = 0.0): LinearLayout {
@@ -1285,53 +1392,71 @@ class DealerPanelActivity : AppCompatActivity() {
     private fun showThresholdSettingsDialog() {
         val docRef = getFranchiseDocRef()
         docRef.get().addOnSuccessListener { snapshot ->
-            val eboneInput = EditText(this).apply {
-                hint = "Ebone (Okara) alert (Rs.)"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText((snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
-            }
-            val wateenInput = EditText(this).apply {
-                hint = "Wateen (Okara) alert (Rs.)"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText((snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
-            }
-            val zongOkaraInput = EditText(this).apply {
-                hint = "Zong (Okara) alert (Rs.)"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText((snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
-            }
-            val zongRenalaInput = EditText(this).apply {
-                hint = "Zong (Renala) alert (Rs.)"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText((snapshot.getDouble("zongLowBalanceThreshold_Renala") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
-            }
+            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
+            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
+            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+
+            val cityName = snapshot.getString("cityName")?.trim()?.takeIf { it.isNotBlank() } ?: CompanyDataHelper.getCurrentCompanyId(this) ?: "Franchise"
+
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(24), dp(8), dp(24), 0)
                 addView(TextView(this@DealerPanelActivity).apply {
-                    text = "Balance limits set karein. Jab balance is se kam hoga to chip red ho jayegi."
+                    text = "Balance limits set karein ($cityName). Jab balance is se kam hoga to chip red ho jayegi."
                     textSize = 12f
                     setTextColor(textMuted)
                     setPadding(0, 0, 0, dp(12))
                 })
-                addView(eboneInput)
-                addView(wateenInput)
-                addView(zongOkaraInput)
-                addView(zongRenalaInput)
+            }
+
+            var eboneInput: EditText? = null
+            var wateenInput: EditText? = null
+            var zongInput: EditText? = null
+
+            if (eboneEnabled) {
+                eboneInput = EditText(this).apply {
+                    hint = "Ebone alert limit (Rs.)"
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText((snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
+                }
+                box.addView(eboneInput)
+            }
+            if (wateenEnabled) {
+                wateenInput = EditText(this).apply {
+                    hint = "Wateen alert limit (Rs.)"
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText((snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
+                }
+                box.addView(wateenInput)
+            }
+            if (zongEnabled) {
+                zongInput = EditText(this).apply {
+                    hint = "Zong alert limit (Rs.)"
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText((snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
+                }
+                box.addView(zongInput)
             }
 
             AlertDialog.Builder(this)
-                .setTitle("Low Balance Alerts")
+                .setTitle("Low Balance Alerts ($cityName)")
                 .setView(box)
                 .setPositiveButton("Save") { _, _ ->
-                    val updates = mapOf(
-                        "eboneLowBalanceThreshold" to (eboneInput.text.toString().trim().toDoubleOrNull() ?: 0.0),
-                        "wateenLowBalanceThreshold" to (wateenInput.text.toString().trim().toDoubleOrNull() ?: 0.0),
-                        "zongLowBalanceThreshold" to (zongOkaraInput.text.toString().trim().toDoubleOrNull() ?: 0.0),
-                        "zongLowBalanceThreshold_Renala" to (zongRenalaInput.text.toString().trim().toDoubleOrNull() ?: 0.0)
-                    )
-                    docRef.set(updates, SetOptions.merge())
-                        .addOnSuccessListener { Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show() }
+                    val updates = mutableMapOf<String, Any>()
+                    if (eboneEnabled && eboneInput != null) {
+                        updates["eboneLowBalanceThreshold"] = eboneInput.text.toString().trim().toDoubleOrNull() ?: 0.0
+                    }
+                    if (wateenEnabled && wateenInput != null) {
+                        updates["wateenLowBalanceThreshold"] = wateenInput.text.toString().trim().toDoubleOrNull() ?: 0.0
+                    }
+                    if (zongEnabled && zongInput != null) {
+                        updates["zongLowBalanceThreshold"] = zongInput.text.toString().trim().toDoubleOrNull() ?: 0.0
+                    }
+                    if (updates.isNotEmpty()) {
+                        docRef.set(updates, SetOptions.merge())
+                            .addOnSuccessListener { Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show() }
+                    }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -1339,18 +1464,20 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun showZoneServiceSettingsDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Which zone?")
-            .setItems(zoneNames.toTypedArray()) { _, which -> showZoneServiceTogglesFor(zoneNames[which]) }
-            .show()
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+        showZoneServiceTogglesFor(canonicalZone)
     }
 
     private fun showZoneServiceTogglesFor(zone: String) {
-        val docRef = db.collection("zoneServiceConfig").document(zone)
+        val docRef = getFranchiseDocRef()
         docRef.get().addOnSuccessListener { snapshot ->
-            val eboneSwitch = Switch(this).apply { text = "Ebone"; isChecked = snapshot.getBoolean("eboneEnabled") ?: true }
-            val wateenSwitch = Switch(this).apply { text = "Wateen"; isChecked = snapshot.getBoolean("wateenEnabled") ?: true }
-            val zongSwitch = Switch(this).apply { text = "Zong"; isChecked = snapshot.getBoolean("zongEnabled") ?: true }
+            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneSwitch = Switch(this).apply { text = "Ebone"; isChecked = (enabledMap?.get("EBONE") as? Boolean) ?: false }
+            val wateenSwitch = Switch(this).apply { text = "Wateen"; isChecked = (enabledMap?.get("WATEEN") as? Boolean) ?: false }
+            val zongSwitch = Switch(this).apply { text = "Zong"; isChecked = (enabledMap?.get("ZONG") as? Boolean) ?: false }
+            val jazzSwitch = Switch(this).apply { text = "Jazz"; isChecked = (enabledMap?.get("JAZZ") as? Boolean) ?: false }
+
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(24), dp(8), dp(24), 0)
@@ -1360,14 +1487,27 @@ class DealerPanelActivity : AppCompatActivity() {
                     setTextColor(textMuted)
                     setPadding(0, 0, 0, dp(12))
                 })
-                addView(eboneSwitch); addView(wateenSwitch); addView(zongSwitch)
+                addView(eboneSwitch)
+                addView(wateenSwitch)
+                addView(zongSwitch)
+                addView(jazzSwitch)
             }
             AlertDialog.Builder(this)
                 .setTitle("$zone — Enabled Services")
                 .setView(box)
                 .setPositiveButton("Save") { _, _ ->
-                    docRef.set(mapOf("eboneEnabled" to eboneSwitch.isChecked, "wateenEnabled" to wateenSwitch.isChecked, "zongEnabled" to zongSwitch.isChecked), SetOptions.merge())
-                        .addOnSuccessListener { Toast.makeText(this, "$zone services updated", Toast.LENGTH_SHORT).show() }
+                    val updatedCompanies = mapOf(
+                        "EBONE" to eboneSwitch.isChecked,
+                        "WATEEN" to wateenSwitch.isChecked,
+                        "ZONG" to zongSwitch.isChecked,
+                        "JAZZ" to jazzSwitch.isChecked
+                    )
+                    docRef.set(mapOf("enabledCompanies" to updatedCompanies), SetOptions.merge())
+                        .addOnSuccessListener {
+                            CityPermissionManager.clearCache(this)
+                            Toast.makeText(this, "$zone services updated", Toast.LENGTH_SHORT).show()
+                            observeFranchiseBalances()
+                        }
                         .addOnFailureListener { e -> Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show() }
                 }
                 .setNegativeButton("Cancel", null)
@@ -1386,43 +1526,76 @@ class DealerPanelActivity : AppCompatActivity() {
     private val zoneNames = listOf("Okara", "Renala")
 
     private fun showAddDealerDialog() {
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
         val nameInput = EditText(this).apply { hint = "Dealer Name" }
         val mobileInput = EditText(this).apply { hint = "Mobile" }
-        val eboneIdInput = EditText(this).apply { hint = "Ebone Panel Dealer ID (e.g. Akmal)" }
+        val eboneIdInput = EditText(this).apply { hint = "Ebone Panel Dealer ID" }
         val wateenIdInput = EditText(this).apply { hint = "Wateen Panel Dealer ID" }
         val zongIdInput = EditText(this).apply { hint = "Zong Panel Dealer ID" }
         val code = (100000..999999).random().toString()
-        val zoneSpinner = Spinner(this).apply { adapter = ArrayAdapter(this@DealerPanelActivity, android.R.layout.simple_spinner_dropdown_item, zoneNames) }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(8), dp(24), 0)
-            addView(nameInput); addView(mobileInput)
-            addView(TextView(this@DealerPanelActivity).apply { text = "Zone (Franchise Tag)"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(14), 0, dp(4)) })
-            addView(zoneSpinner)
-            addView(TextView(this@DealerPanelActivity).apply { text = "ISP Panel Dealer IDs (leave blank if not known yet)"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(14), 0, dp(4)) })
-            addView(eboneIdInput)
-            addView(LinearLayout(this@DealerPanelActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(wateenIdInput.also { it.layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-                addView(Button(this@DealerPanelActivity).apply { text = "🔎 Fetch"; textSize = 12f; setOnClickListener {
-                    val name = nameInput.text.toString().trim()
-                    if (name.isEmpty()) Toast.makeText(this@DealerPanelActivity, "Type the dealer's name first", Toast.LENGTH_SHORT).show()
-                    else fetchWateenDealerId(wateenIdInput, name)
-                }})
-            })
-            addView(zongIdInput)
-            addView(TextView(this@DealerPanelActivity).apply { text = "Code: $code"; textSize = 22f; setPadding(0, dp(16), 0, 0) })
+
+        val docRef = getFranchiseDocRef()
+        docRef.get().addOnSuccessListener { snapshot ->
+            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
+            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
+            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
+            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(24), dp(8), dp(24), 0)
+                addView(nameInput)
+                addView(mobileInput)
+                addView(TextView(this@DealerPanelActivity).apply { text = "Franchise: $canonicalZone"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(14), 0, dp(4)) })
+                addView(TextView(this@DealerPanelActivity).apply { text = "ISP Panel Dealer IDs (leave blank if not known yet)"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(14), 0, dp(4)) })
+                if (eboneEnabled) addView(eboneIdInput)
+                if (wateenEnabled) {
+                    addView(LinearLayout(this@DealerPanelActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(wateenIdInput.also { it.layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
+                        addView(Button(this@DealerPanelActivity).apply {
+                            text = "🔎 Fetch"
+                            textSize = 12f
+                            setOnClickListener {
+                                val name = nameInput.text.toString().trim()
+                                if (name.isEmpty()) Toast.makeText(this@DealerPanelActivity, "Type the dealer's name first", Toast.LENGTH_SHORT).show()
+                                else fetchWateenDealerId(wateenIdInput, name)
+                            }
+                        })
+                    })
+                }
+                if (zongEnabled) addView(zongIdInput)
+                addView(TextView(this@DealerPanelActivity).apply { text = "Code: $code"; textSize = 16f; setPadding(0, dp(14), 0, 0) })
+            }
+
+            AlertDialog.Builder(this).setTitle("Add Dealer ($canonicalZone)").setView(box).setPositiveButton("Create") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val mobile = mobileInput.text.toString().trim()
+                if (name.isEmpty() || mobile.isEmpty()) {
+                    Toast.makeText(this, "Dealer name and mobile are required", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val dealerId = db.collection("dealers").document().id
+                val dealer = mapOf(
+                    "dealerId" to dealerId,
+                    "name" to name,
+                    "mobile" to mobile,
+                    "dealerCode" to code,
+                    "zone" to canonicalZone,
+                    "companyId" to currentComp,
+                    "eboneDealerId" to if (eboneEnabled) eboneIdInput.text.toString().trim() else "",
+                    "wateenDealerId" to if (wateenEnabled) wateenIdInput.text.toString().trim() else "",
+                    "zongDealerId" to if (zongEnabled) zongIdInput.text.toString().trim() else "",
+                    "createdAt" to System.currentTimeMillis()
+                )
+                db.collection("dealers").document(dealerId).set(dealer).addOnSuccessListener {
+                    Toast.makeText(this, "Dealer '$name' created for $canonicalZone", Toast.LENGTH_SHORT).show()
+                }
+            }.setNegativeButton("Cancel", null).show()
         }
-        AlertDialog.Builder(this).setTitle("Add Dealer").setView(box).setPositiveButton("Create") { _, _ ->
-            val name = nameInput.text.toString().trim()
-            val mobile = mobileInput.text.toString().trim()
-            if (name.isEmpty() || mobile.isEmpty()) { Toast.makeText(this, "Dealer name and mobile are required", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
-            val zone = zoneNames[zoneSpinner.selectedItemPosition]
-            val dealerId = db.collection("dealers").document().id
-            val dealer = mapOf("dealerId" to dealerId, "name" to name, "mobile" to mobile, "dealerCode" to code, "deviceId" to "", "status" to "ACTIVE", "zone" to zone, "wateenBalance" to 0.0, "eboneBalance" to 0.0, "zongBalance" to 0.0, "eboneDealerId" to eboneIdInput.text.toString().trim(), "wateenDealerId" to wateenIdInput.text.toString().trim(), "zongDealerId" to zongIdInput.text.toString().trim(), "paymentAccounts" to paymentAccountNames.associateWith { true }, "createdAt" to System.currentTimeMillis())
-            db.collection("dealers").document(dealerId).set(dealer).addOnSuccessListener { Toast.makeText(this, "Dealer created. Code: $code", Toast.LENGTH_LONG).show() }.addOnFailureListener { error -> Toast.makeText(this, "Dealer creation failed: ${error.message}", Toast.LENGTH_LONG).show() }
-        }.setNegativeButton("Cancel", null).show()
     }
 
     private fun resetDealerBalance(dealerId: String, name: String, zone: String) {

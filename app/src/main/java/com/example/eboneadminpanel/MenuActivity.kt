@@ -16,10 +16,18 @@ class MenuActivity : BaseAdminActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_menu)
 
+        // Automatically clean and purge all orphaned/ghost records from Realtime Database on startup
+        com.example.superadmin.repositories.CompanyRepository().cleanOrphanedData()
+
         val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
         Log.d("SuperAdminCheck", "Current User Email: '$currentUserEmail'")
         val menuManageCompanies = findViewById<TextView>(R.id.menuManageCompanies)
         val menuCityManagement = findViewById<TextView>(R.id.menuCityManagement)
+        val menuAboutAppBuilder = findViewById<TextView>(R.id.menuAboutAppBuilder)
+
+        menuAboutAppBuilder.setOnClickListener {
+            showAboutAppBuilderDialog()
+        }
 
         if (currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true) {
             menuManageCompanies.visibility = View.VISIBLE
@@ -56,10 +64,16 @@ class MenuActivity : BaseAdminActivity() {
             "Settings" to findViewById<TextView>(R.id.menuSettings)
         )
 
+        val isSuperAdmin = currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true
+
         for ((featureName, view) in menuViews) {
             view?.let { v ->
-                CityPermissionManager.isFeatureEnabled(this, currentZone, featureName) { isEnabled ->
-                    v.visibility = if (isEnabled) View.VISIBLE else View.GONE
+                if (isSuperAdmin) {
+                    v.visibility = View.VISIBLE
+                } else {
+                    CityPermissionManager.isFeatureEnabled(this, currentZone, featureName) { isEnabled ->
+                        v.visibility = if (isEnabled) View.VISIBLE else View.GONE
+                    }
                 }
             }
         }
@@ -124,14 +138,50 @@ class MenuActivity : BaseAdminActivity() {
             startActivity(Intent(this, SetPinActivity::class.java))
         }
 
+        val menuCompanyLog = findViewById<TextView>(R.id.menuCompanyLog)
+        if (currentUserEmail == "abbasok@gmail.com" || currentUserEmail?.contains("abbasok") == true) {
+            menuCompanyLog?.visibility = View.VISIBLE
+            menuCompanyLog?.setOnClickListener {
+                startActivity(Intent(this, CompanyLogActivity::class.java))
+            }
+        } else {
+            menuCompanyLog?.visibility = View.GONE
+        }
+
         findViewById<TextView>(R.id.menuLogout).setOnClickListener {
+            com.example.superadmin.core.AppActivityTracker.onUserLogout()
             FirebaseAuth.getInstance().signOut()
             SessionManager(this).clearSession()
             SetPinActivity.clearPin(this)
-            val intent = Intent(this, LoginActivity::class.java)
+            val intent =Intent(this, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             startActivity(intent)
             finish()
         }
+    }
+
+    private fun showAboutAppBuilderDialog() {
+        val message = """
+            📱 App Builder & Developer Information
+            
+            👤 Name: Muhammad Abbas (Lead App Builder & Developer)
+            📞 Contact / WhatsApp: 03213951111
+            
+            🛠️ System & Developer Commands / Features:
+            • Advanced SuperAdmin Architecture & Multi-Company Control
+            • City & Franchise Permission Manager with Live Toggles
+            • Automated SMS Payment Verification & Dealer Ledger Sync
+            • Employee Biometric Attendance & Admin Override System
+            • Network & ISP Panel Configuration with Secure MasterKey Encryption
+            • Real-time Firebase Database Synchronization & Background Workers
+            
+            ✨ "Built with enterprise-grade reliability, cutting-edge Android development standards, and robust automation."
+        """.trimIndent()
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("ℹ️ About App Builder")
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
     }
 }
