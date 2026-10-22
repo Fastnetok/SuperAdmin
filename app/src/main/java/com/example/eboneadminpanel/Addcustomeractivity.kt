@@ -673,6 +673,7 @@ class AddCustomerActivity : AppCompatActivity() {
                                         ) * msPerDay
                 }
 
+                val currentCompanyId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
                 val data =
                     hashMapOf<String, Any?>(
                         "customerId" to customerId,
@@ -685,6 +686,8 @@ class AddCustomerActivity : AppCompatActivity() {
                         "linkedDeviceId" to null,
                         "lastPaymentDate" to lastPaymentDate,
                         "ispProvider" to company,
+                        "companyId" to currentCompanyId,
+                        "zone" to currentCompanyId,
                         "source" to "ADD_CUSTOMER",
                         "masterUserLinked" to (
                                 selectedMasterUserId ==

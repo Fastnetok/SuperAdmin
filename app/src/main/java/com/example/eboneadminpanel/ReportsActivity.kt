@@ -5,18 +5,24 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.Spinner
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -31,9 +37,19 @@ class ReportsActivity : AppCompatActivity() {
     private lateinit var todayButton: Button
     private lateinit var employeeReportsButton: Button
     private lateinit var calendarPickerButton: Button
+    private lateinit var companySpinner: Spinner
+    private var availableCompaniesList = listOf<String>()
+    
     private val reportList = mutableListOf<ReportItem>()
     private val allReports = mutableListOf<ReportItem>()
     private lateinit var adapter: ReportAdapter
+
+    private var activeMode = "TODAY" // TODAY, MONTH, RANGE
+    private var lastFromMs = 0L
+    private var lastToMs = 0L
+    private var lastFromDate = ""
+    private var lastToDate = ""
+    private var lastIsMonth = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,6 +59,7 @@ class ReportsActivity : AppCompatActivity() {
         todayButton = findViewById(R.id.todayButton)
         employeeReportsButton = findViewById(R.id.employeeReportsButton)
         calendarPickerButton = findViewById(R.id.calendarPickerButton)
+        companySpinner = findViewById(R.id.companySpinner)
 
         val root = findViewById<View>(android.R.id.content)
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -61,14 +78,12 @@ class ReportsActivity : AppCompatActivity() {
         adapter = ReportAdapter(
             reportList,
             onRepeatClick = {
-                // Header "REPEAT COMPLAINTS" box clicked -> show full repeat list across ALL employees
                 val intent = Intent(this, EmployeeReportDetailsActivity::class.java)
                 intent.putExtra("employeeName", ALL_EMPLOYEES_REPORT_MARKER)
                 intent.putExtra("showRepeat", true)
                 startActivity(intent)
             },
             onTotalComplaintsClick = {
-                // Header Total Complaints / Overall Summary card clicked -> open AllComplaintsActivity
                 val intent = Intent(this, AllComplaintsActivity::class.java)
                 startActivity(intent)
             }
@@ -76,20 +91,84 @@ class ReportsActivity : AppCompatActivity() {
         recyclerView.adapter = adapter
 
         setActiveButton(todayButton)
-        loadTodayDashboard()
+        loadCompaniesSpinner()
 
         todayButton.setOnClickListener {
             setActiveButton(todayButton)
+            activeMode = "TODAY"
             loadTodayDashboard()
         }
 
         employeeReportsButton.setOnClickListener {
             setActiveButton(employeeReportsButton)
+            activeMode = "MONTH"
             showMonthSelector()
         }
 
         calendarPickerButton.setOnClickListener {
             showCustomDateRangePicker()
+        }
+    }
+
+    private fun loadCompaniesSpinner() {
+        val isSuper = CompanyDataHelper.isSuperAdmin(this)
+        if (!isSuper) {
+            val myComp = SessionManager(this).getCompanyId()?.trim()?.uppercase() ?: "OKA-001"
+            availableCompaniesList = listOf(myComp)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = false
+            companySpinner.alpha = 0.6f
+            reloadCurrentView()
+            return
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection("companies").get().addOnSuccessListener { snap ->
+            val set = mutableSetOf<String>()
+            set.add("All Companies")
+            snap.documents.forEach { doc ->
+                val id = doc.id.trim().uppercase()
+                if (CompanyDataHelper.isValidCompanyId(id)) set.add(id)
+                doc.getString("companyId")?.let {
+                    val cid = it.trim().uppercase()
+                    if (CompanyDataHelper.isValidCompanyId(cid)) set.add(cid)
+                }
+            }
+            availableCompaniesList = set.toList().sorted()
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+
+            val activeComp = SessionManager(this).getActiveCompanyId() ?: "All Companies"
+            val idx = availableCompaniesList.indexOfFirst { it.equals(activeComp, true) }.coerceAtLeast(0)
+            companySpinner.setSelection(idx)
+
+            companySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: AdapterView<*>?, v0: View?, pos: Int, id: Long) {
+                    val comp = availableCompaniesList.getOrNull(pos) ?: return
+                    SessionManager(this@ReportsActivity).saveActiveCompany(comp)
+                    reloadCurrentView()
+                }
+                override fun onNothingSelected(p0: AdapterView<*>?) {}
+            }
+            reloadCurrentView()
+        }.addOnFailureListener {
+            availableCompaniesList = listOf("All Companies", "OKA-001", "DEP-001", "DEP-002")
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+            reloadCurrentView()
+        }
+    }
+
+    private fun reloadCurrentView() {
+        when (activeMode) {
+            "TODAY" -> loadTodayDashboard()
+            "MONTH" -> showMonthSelector()
+            "RANGE" -> loadCustomDateRangeReport(lastFromDate, lastToDate, lastFromMs, lastToMs, lastIsMonth)
         }
     }
 
@@ -131,6 +210,12 @@ class ReportsActivity : AppCompatActivity() {
                     val toStr = sdf.format(Date(toMs))
 
                     setActiveButton(calendarPickerButton)
+                    activeMode = "RANGE"
+                    lastFromMs = fromMs
+                    lastToMs = toMs
+                    lastFromDate = fromStr
+                    lastToDate = toStr
+                    lastIsMonth = false
                     loadCustomDateRangeReport(fromStr, toStr, fromMs, toMs)
                 }
             }
@@ -166,6 +251,12 @@ class ReportsActivity : AppCompatActivity() {
                             Toast.makeText(this, "Start date pehle honi chahiye", Toast.LENGTH_SHORT).show()
                         } else {
                             setActiveButton(calendarPickerButton)
+                            activeMode = "RANGE"
+                            lastFromMs = fromMs
+                            lastToMs = toMs
+                            lastFromDate = fromStr
+                            lastToDate = toStr
+                            lastIsMonth = false
                             loadCustomDateRangeReport(fromStr, toStr, fromMs, toMs)
                         }
                     },
@@ -180,11 +271,6 @@ class ReportsActivity : AppCompatActivity() {
         ).show()
     }
 
-    private fun loadOverallReport() {
-        loadCustomDateRangeReport("📊 OVERALL REPORTS", "", 0L, Long.MAX_VALUE, isMonthLabel = false)
-    }
-
-    // MONTHLY REPORTS — open current calendar month directly.
     private fun showMonthSelector() {
         val currentCalendar = Calendar.getInstance()
         val currentYear = currentCalendar.get(Calendar.YEAR)
@@ -212,6 +298,13 @@ class ReportsActivity : AppCompatActivity() {
             "MMMM yyyy",
             Locale.getDefault()
         ).format(startCalendar.time)
+
+        activeMode = "MONTH"
+        lastFromMs = fromTime
+        lastToMs = toTime
+        lastFromDate = monthLabel
+        lastToDate = ""
+        lastIsMonth = true
 
         loadCustomDateRangeReport(monthLabel, "", fromTime, toTime, isMonthLabel = true)
     }
@@ -270,11 +363,14 @@ class ReportsActivity : AppCompatActivity() {
 
                             val complaintIds = mutableSetOf<String>()
                             for (cs in resolvedSnapshot.children) {
+                                if (!CompanyDataHelper.belongsToCurrentCompany(this@ReportsActivity, cs)) continue
                                 val id = cs.child("complaintId").getValue(String::class.java) ?: cs.key ?: ""
                                 if (id.isNotEmpty()) complaintIds.add(id)
                             }
 
                             fun addComplaint(cs: DataSnapshot) {
+                                if (!CompanyDataHelper.belongsToCurrentCompany(this@ReportsActivity, cs)) return
+
                                 val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java)
                                     ?: (cs.child("isNewConnection").getValue(String::class.java)?.toBoolean() ?: false)
                                 if (isNewConnection) return
@@ -286,7 +382,6 @@ class ReportsActivity : AppCompatActivity() {
                                 val assignedTime = cs.child("assignedTime").getValue(Long::class.java)
                                     ?: cs.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
 
-                                // Check date range
                                 val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)
                                 val inRange = (createdTime in fromMs..toMs) ||
                                               (resolvedTime in fromMs..toMs) ||
@@ -465,7 +560,7 @@ class ReportsActivity : AppCompatActivity() {
                 adapter.notifyDataSetChanged()
             }
         })
-}
+    }
 
     private fun getTodayStart(): Long {
         return Calendar.getInstance().apply {
@@ -476,7 +571,6 @@ class ReportsActivity : AppCompatActivity() {
         }.timeInMillis
     }
 
-    // TODAY — loads Today's active complaints & counts using Main Dashboard's exact logic
     private fun loadTodayDashboard() {
         reportList.clear()
         allReports.clear()
@@ -502,6 +596,8 @@ class ReportsActivity : AppCompatActivity() {
                     val todayStart = getTodayStart()
 
                     for (item in snapshot.children) {
+                        if (!CompanyDataHelper.belongsToCurrentCompany(this@ReportsActivity, item)) continue
+
                         val isNewConnection = item.child("isNewConnection").getValue(Boolean::class.java) ?: false
                         if (isNewConnection) continue
 

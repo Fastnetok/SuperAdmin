@@ -10,7 +10,11 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
+import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
 
 class OfficeTimmingsActivity : AppCompatActivity() {
 
@@ -32,11 +36,67 @@ class OfficeTimmingsActivity : AppCompatActivity() {
     private lateinit var tvPostShift: TextView
     private lateinit var tvComplaintRadius: TextView
     private lateinit var tvStatus: TextView
+    private lateinit var companySpinner: Spinner
+    private var availableCompaniesList = listOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildLayout())
-        loadSettings()
+        loadCompaniesSpinner()
+    }
+
+    private fun loadCompaniesSpinner() {
+        val isSuper = CompanyDataHelper.isSuperAdmin(this)
+        if (!isSuper) {
+            val myComp = SessionManager(this).getCompanyId()?.trim()?.uppercase() ?: "OKA-001"
+            availableCompaniesList = listOf(myComp)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = false
+            companySpinner.alpha = 0.6f
+            loadSettings()
+            return
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection("companies").get().addOnSuccessListener { snap ->
+            val set = mutableSetOf<String>()
+            set.add("All Companies")
+            snap.documents.forEach { doc ->
+                val id = doc.id.trim().uppercase()
+                if (CompanyDataHelper.isValidCompanyId(id)) set.add(id)
+                doc.getString("companyId")?.let {
+                    val cid = it.trim().uppercase()
+                    if (CompanyDataHelper.isValidCompanyId(cid)) set.add(cid)
+                }
+            }
+            availableCompaniesList = set.toList().sorted()
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+
+            val activeComp = SessionManager(this).getActiveCompanyId() ?: "All Companies"
+            val idx = availableCompaniesList.indexOfFirst { it.equals(activeComp, true) }.coerceAtLeast(0)
+            companySpinner.setSelection(idx)
+
+            companySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: AdapterView<*>?, v0: View?, pos: Int, id: Long) {
+                    val comp = availableCompaniesList.getOrNull(pos) ?: return
+                    SessionManager(this@OfficeTimmingsActivity).saveActiveCompany(comp)
+                    loadSettings()
+                }
+                override fun onNothingSelected(p0: AdapterView<*>?) {}
+            }
+            loadSettings()
+        }.addOnFailureListener {
+            availableCompaniesList = listOf("All Companies", "OKA-001", "DEP-001", "DEP-002")
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+            loadSettings()
+        }
     }
 
     private fun buildLayout(): View {
@@ -94,6 +154,19 @@ class OfficeTimmingsActivity : AppCompatActivity() {
             setPadding(px(12,dp), px(12,dp), px(12,dp), px(12,dp))
         }
         scroll.addView(content)
+
+        // ── Company Selector Card ──
+        val companyCard = card(dp)
+        companyCard.addView(
+            tv("Select Company / License", 12f, Color.parseColor("#757575")).also {
+                it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
+            }
+        )
+        companySpinner = Spinner(this).apply {
+            layoutParams = llp().also { it.bottomMargin = px(4, dp) }
+        }
+        companyCard.addView(companySpinner)
+        content.addView(companyCard)
 
         // ── Office Hours Card ──
         val officeCard = card(dp)
@@ -267,7 +340,6 @@ class OfficeTimmingsActivity : AppCompatActivity() {
             setPadding(px(16,dp), px(12,dp), px(16,dp), px(12,dp))
         }
 
-        // Horizontal scroll for quick select buttons
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(24,dp), px(8,dp), px(24,dp), px(8,dp)) }
         layout.addView(et)
 
@@ -279,7 +351,6 @@ class OfficeTimmingsActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
         
-        // Time options: 15m, 30m, 45m, 1h, 2h, 3h, 4h, 5h
         val options = listOf(
             15 to "15m", 30 to "30m", 45 to "45m", 
             60 to "1h", 120 to "2h", 180 to "3h", 
@@ -355,26 +426,42 @@ class OfficeTimmingsActivity : AppCompatActivity() {
     // ── Firebase ──
 
     private fun loadSettings() {
-        db.getReference("officeSettings").get().addOnSuccessListener { snap ->
-            startHour = (snap.child("startHour").value as? Long)?.toInt() ?: 10
-            startMinute = (snap.child("startMinute").value as? Long)?.toInt() ?: 0
-            endHour = (snap.child("endHour").value as? Long)?.toInt() ?: 22
-            endMinute = (snap.child("endMinute").value as? Long)?.toInt() ?: 0
-            gracePeriod = (snap.child("gracePeriodMinutes").value as? Long)?.toInt() ?: 15
-            preShiftWindow = (snap.child("preShiftMinutes").value as? Long)?.toInt() ?: 60
-            postShiftWindow = (snap.child("postShiftMinutes").value as? Long)?.toInt() ?: 60
-            complaintRadius = (snap.child("complaintRadiusMeters").value as? Long)?.toInt() ?: 500
-
-            tvStartTime.text = formatTime(startHour, startMinute)
-            tvEndTime.text = formatTime(endHour, endMinute)
-            tvGrace.text = "$gracePeriod min"
-            tvPreShift.text = "$preShiftWindow min"
-            tvPostShift.text = "$postShiftWindow min"
-            tvComplaintRadius.text = "$complaintRadius m"
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        db.getReference("officeSettings").child(compId).get().addOnSuccessListener { snap ->
+            if (!snap.exists()) {
+                db.getReference("officeSettings").get().addOnSuccessListener { rootSnap ->
+                    parseOfficeSettings(rootSnap)
+                }
+            } else {
+                parseOfficeSettings(snap)
+            }
+        }.addOnFailureListener {
+            db.getReference("officeSettings").get().addOnSuccessListener { rootSnap ->
+                parseOfficeSettings(rootSnap)
+            }
         }
     }
 
+    private fun parseOfficeSettings(snap: DataSnapshot) {
+        startHour = (snap.child("startHour").value as? Long)?.toInt() ?: 10
+        startMinute = (snap.child("startMinute").value as? Long)?.toInt() ?: 0
+        endHour = (snap.child("endHour").value as? Long)?.toInt() ?: 22
+        endMinute = (snap.child("endMinute").value as? Long)?.toInt() ?: 0
+        gracePeriod = (snap.child("gracePeriodMinutes").value as? Long)?.toInt() ?: 15
+        preShiftWindow = (snap.child("preShiftMinutes").value as? Long)?.toInt() ?: 60
+        postShiftWindow = (snap.child("postShiftMinutes").value as? Long)?.toInt() ?: 60
+        complaintRadius = (snap.child("complaintRadiusMeters").value as? Long)?.toInt() ?: 500
+
+        tvStartTime.text = formatTime(startHour, startMinute)
+        tvEndTime.text = formatTime(endHour, endMinute)
+        tvGrace.text = "$gracePeriod min"
+        tvPreShift.text = "$preShiftWindow min"
+        tvPostShift.text = "$postShiftWindow min"
+        tvComplaintRadius.text = "$complaintRadius m"
+    }
+
     private fun saveSettings() {
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
         val data = mapOf(
             "startHour" to startHour,
             "startMinute" to startMinute,
@@ -385,9 +472,9 @@ class OfficeTimmingsActivity : AppCompatActivity() {
             "postShiftMinutes" to postShiftWindow,
             "complaintRadiusMeters" to complaintRadius
         )
-        db.getReference("officeSettings").setValue(data)
+        db.getReference("officeSettings").child(compId).setValue(data)
             .addOnSuccessListener {
-                tvStatus.text = "Settings saved! ✅"
+                tvStatus.text = "Settings saved for $compId! ✅"
                 tvStatus.setTextColor(Color.parseColor("#2E7D32"))
             }
             .addOnFailureListener { e ->
@@ -451,7 +538,6 @@ class OfficeTimmingsActivity : AppCompatActivity() {
                         ).also { it.bottomMargin = px(8,dp) }
                     }
 
-                    // Name + Status row
                     val topRow = android.widget.LinearLayout(this@OfficeTimmingsActivity).apply {
                         orientation = android.widget.LinearLayout.HORIZONTAL
                         gravity = android.view.Gravity.CENTER_VERTICAL
@@ -502,7 +588,6 @@ class OfficeTimmingsActivity : AppCompatActivity() {
                         ).also { it.topMargin = px(2,dp) }
                     })
 
-                    // Approve/Reject buttons for PENDING
                     if (status == "PENDING") {
                         val btnRow = android.widget.LinearLayout(this@OfficeTimmingsActivity).apply {
                             orientation = android.widget.LinearLayout.HORIZONTAL

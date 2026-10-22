@@ -47,7 +47,8 @@ android {
 
         release {
             val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
-            signingConfig = if (isGitHub) {
+            val releaseKeyFile = file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
+            signingConfig = if (isGitHub || !releaseKeyFile.exists()) {
                 signingConfigs.getByName("debug")
             } else {
                 signingConfigs.getByName("release")

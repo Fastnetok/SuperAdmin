@@ -138,14 +138,13 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             startActivity(android.content.Intent(this, OfficeGeofenceActivity::class.java))
         })
         btnRow.addView(actionBtn("History", "#2E5C1A") {
-            if (selectedDeviceId.isEmpty()) showMsg("Select an employee first.")
-            else {
-                val intent = android.content.Intent(this, SalaryHistoryActivity::class.java)
+            val intent = android.content.Intent(this, SalaryHistoryActivity::class.java)
+            if (selectedDeviceId.isNotEmpty()) {
                 intent.putExtra("deviceId", selectedDeviceId)
                 intent.putExtra("employeeName", selectedEmployee)
                 intent.putExtra("baseSalary", baseSalary)
-                startActivity(intent)
             }
+            startActivity(intent)
         })
         btnRow.addView(actionBtn("All Total", "#6A1B9A") {
             startActivity(android.content.Intent(this, AllSalaryTotalActivity::class.java))
@@ -964,62 +963,130 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             return
         }
 
-        var loaded = 0
-        // name -> (checkIn, checkOut, status) or null if no record today
-        val results = mutableMapOf<String, Triple<String, String, String>?>()
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        db.getReference("attendanceGeofence").child(compId).get().addOnSuccessListener { geoSnap ->
+            val geoLat = geoSnap.child("lat").value?.toString()?.toDoubleOrNull()
+            val geoLng = geoSnap.child("lng").value?.toString()?.toDoubleOrNull()
+            val geoRadius = geoSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
 
-        allNames.forEach { name ->
-            val did = employeeMap[name]
-            if (did == null) {
-                results[name] = null
-                loaded++
-                if (loaded >= allNames.size) {
-                    runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
-                }
-                return@forEach
-            }
-            db.getReference("attendance").child(did).child(todayKey)
-                .get()
-                .addOnSuccessListener { snap ->
-                    // NEW structure: attendance/{id}/{date}/sessions/{index}/...
-                    // Employees can check in multiple times a day, so pick the
-                    // FIRST session's check-in time and the LATEST session's
-                    // check-out time (or "active" if still checked in).
-                    val sessSnap = snap.child("sessions")
-                    val triple: Triple<String, String, String>? = if (sessSnap.exists()) {
-                        val sessions = sessSnap.children.toList()
-                        val firstCheckIn = sessions.firstOrNull {
-                            (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
-                        }?.child("checkInTime")?.value?.toString() ?: ""
-                        val lastCheckOut = sessions.lastOrNull {
-                            (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
-                        }?.child("checkOutTime")?.value?.toString() ?: ""
-                        val anyLateStatus = sessions.any {
-                            it.child("status").value?.toString() == "LATE"
-                        }
-                        if (firstCheckIn.isNotEmpty())
-                            Triple(firstCheckIn, lastCheckOut, if (anyLateStatus) "LATE" else "ON_TIME")
-                        else null
-                    } else {
-                        // OLD/legacy structure: checkInTime directly on the date node.
-                        val checkIn = snap.child("checkInTime").value?.toString() ?: ""
-                        val checkOut = snap.child("checkOutTime").value?.toString() ?: ""
-                        val status = snap.child("status").value?.toString() ?: ""
-                        if (checkIn.isNotEmpty()) Triple(checkIn, checkOut, status) else null
-                    }
-                    results[name] = triple
-                    loaded++
-                    if (loaded >= allNames.size) {
-                        runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
-                    }
-                }
-                .addOnFailureListener {
+            var loaded = 0
+            val results = mutableMapOf<String, Triple<String, String, String>?>()
+
+            allNames.forEach { name ->
+                val did = employeeMap[name]
+                if (did == null) {
                     results[name] = null
                     loaded++
                     if (loaded >= allNames.size) {
                         runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
                     }
+                    return@forEach
                 }
+                db.getReference("attendance").child(did).child(todayKey)
+                    .get()
+                    .addOnSuccessListener { snap ->
+                        val empLat = snap.child("latitude").value?.toString()?.toDoubleOrNull()
+                            ?: snap.child("checkInLatitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+                        val empLng = snap.child("longitude").value?.toString()?.toDoubleOrNull()
+                            ?: snap.child("checkInLongitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+
+                        var isWithinGeofence = true
+                        if (geoLat != null && geoLng != null && empLat != 0.0 && empLng != 0.0) {
+                            val dist = DistanceCalculator.distanceBetween(empLat, empLng, geoLat, geoLng)
+                            if (dist > geoRadius) {
+                                isWithinGeofence = false
+                            }
+                        }
+
+                        val sessSnap = snap.child("sessions")
+                        val triple: Triple<String, String, String>? = if (sessSnap.exists()) {
+                            val sessions = sessSnap.children.toList()
+                            val firstCheckIn = sessions.firstOrNull {
+                                (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
+                            }?.child("checkInTime")?.value?.toString() ?: ""
+                            val lastCheckOut = sessions.lastOrNull {
+                                (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
+                            }?.child("checkOutTime")?.value?.toString() ?: ""
+                            val anyLateStatus = sessions.any {
+                                it.child("status").value?.toString() == "LATE"
+                            }
+                            if (firstCheckIn.isNotEmpty()) {
+                                if (!isWithinGeofence) Triple(firstCheckIn, lastCheckOut, "OUTSIDE_GEOFENCE")
+                                else Triple(firstCheckIn, lastCheckOut, if (anyLateStatus) "LATE" else "ON_TIME")
+                            } else null
+                        } else {
+                            val checkIn = snap.child("checkInTime").value?.toString() ?: ""
+                            val checkOut = snap.child("checkOutTime").value?.toString() ?: ""
+                            val status = snap.child("status").value?.toString() ?: ""
+                            if (checkIn.isNotEmpty()) {
+                                if (!isWithinGeofence) Triple(checkIn, checkOut, "OUTSIDE_GEOFENCE")
+                                else Triple(checkIn, checkOut, status)
+                            } else null
+                        }
+                        results[name] = triple
+                        loaded++
+                        if (loaded >= allNames.size) {
+                            runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                        }
+                    }
+                    .addOnFailureListener {
+                        results[name] = null
+                        loaded++
+                        if (loaded >= allNames.size) {
+                            runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                        }
+                    }
+            }
+        }.addOnFailureListener {
+            // Fallback if geofence load fails
+            var loaded = 0
+            val results = mutableMapOf<String, Triple<String, String, String>?>()
+            allNames.forEach { name ->
+                val did = employeeMap[name]
+                if (did == null) {
+                    results[name] = null
+                    loaded++
+                    if (loaded >= allNames.size) {
+                        runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                    }
+                    return@forEach
+                }
+                db.getReference("attendance").child(did).child(todayKey).get()
+                    .addOnSuccessListener { snap ->
+                        val sessSnap = snap.child("sessions")
+                        val triple: Triple<String, String, String>? = if (sessSnap.exists()) {
+                            val sessions = sessSnap.children.toList()
+                            val firstCheckIn = sessions.firstOrNull {
+                                (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
+                            }?.child("checkInTime")?.value?.toString() ?: ""
+                            val lastCheckOut = sessions.lastOrNull {
+                                (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
+                            }?.child("checkOutTime")?.value?.toString() ?: ""
+                            val anyLateStatus = sessions.any {
+                                it.child("status").value?.toString() == "LATE"
+                            }
+                            if (firstCheckIn.isNotEmpty()) Triple(firstCheckIn, lastCheckOut, if (anyLateStatus) "LATE" else "ON_TIME")
+                            else null
+                        } else {
+                            val checkIn = snap.child("checkInTime").value?.toString() ?: ""
+                            val checkOut = snap.child("checkOutTime").value?.toString() ?: ""
+                            val status = snap.child("status").value?.toString() ?: ""
+                            if (checkIn.isNotEmpty()) Triple(checkIn, checkOut, status) else null
+                        }
+                        results[name] = triple
+                        loaded++
+                        if (loaded >= allNames.size) {
+                            runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                        }
+                    }
+                    .addOnFailureListener {
+                        results[name] = null
+                        loaded++
+                        if (loaded >= allNames.size) {
+                            runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                        }
+                    }
+            }
         }
     }
 
@@ -1073,6 +1140,7 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 })
                 val badgeText: String; val badgeColor: Int; val badgeBg: Int
                 when (status) {
+                    "OUTSIDE_GEOFENCE" -> { badgeText = "Outside Geofence (Rejected)"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
                     "LATE" -> { badgeText = "Late"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
                     "OVERTIME" -> { badgeText = "OT"; badgeColor = Color.parseColor("#1565C0"); badgeBg = Color.parseColor("#E3F2FD") }
                     else -> { badgeText = "On Time"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }

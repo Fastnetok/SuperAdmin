@@ -23,6 +23,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.example.superadmin.core.CompanyDataHelper
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -302,6 +303,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val names = mutableSetOf<String>()
                     for (cs in snapshot.children) {
+                        if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeReportDetailsActivity, cs)) continue
                         val name = cs.child("assignedTo").getValue(String::class.java) ?: ""
                         if (name.isNotEmpty()) names.add(normalizeName(name))
                     }
@@ -310,6 +312,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                         .addListenerForSingleValueEvent(object : ValueEventListener {
                             override fun onDataChange(resSnapshot: DataSnapshot) {
                                 for (cs in resSnapshot.children) {
+                                    if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeReportDetailsActivity, cs)) continue
                                     val name = cs.child("assignedTo").getValue(String::class.java) ?: ""
                                     if (name.isNotEmpty()) names.add(normalizeName(name))
                                 }
@@ -556,6 +559,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                     override fun onDataChange(snapshot: DataSnapshot) {
 
                         for (cs in snapshot.children) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeReportDetailsActivity, cs)) continue
                             val assignedRaw = cs.child("assignedTo").getValue(String::class.java) ?: ""
                             val assignedNorm = normalizeName(assignedRaw)
                             val createdTime = cs.child("createdTime").getValue(Long::class.java)
@@ -646,6 +650,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                                     }
 
                                     for (cs in resolvedSnapshot.children) {
+                                        if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeReportDetailsActivity, cs)) continue
                                         val assignedRaw = cs.child("assignedTo").getValue(String::class.java) ?: ""
                                         val assignedNorm = normalizeName(assignedRaw)
                                         val createdTime = cs.child("createdTime").getValue(Long::class.java)
@@ -904,6 +909,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                         val complaintIds = mutableSetOf<String>()
 
                         for (cs in snapshot.children) {
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeReportDetailsActivity, cs)) continue
                             val cId = cs.child("complaintId").getValue(String::class.java) ?: cs.key ?: ""
                             if (cId.isNotEmpty()) complaintIds.add(cId)
 
@@ -970,6 +976,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                             .addListenerForSingleValueEvent(object : ValueEventListener {
                                 override fun onDataChange(resolvedSnapshot: DataSnapshot) {
                                     for (cs in resolvedSnapshot.children) {
+                                        if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeReportDetailsActivity, cs)) continue
                                         val complaintId = cs.child("complaintId").getValue(String::class.java) ?: cs.key ?: ""
                                         if (complaintId.isNotEmpty() && complaintIds.contains(complaintId)) continue
 

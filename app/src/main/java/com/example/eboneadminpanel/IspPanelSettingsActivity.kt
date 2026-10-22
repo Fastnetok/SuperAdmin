@@ -34,7 +34,6 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
     companion object {
         private const val KEY_ACCOUNTS = "all_accounts_json"
-        private const val MASTER_OVERRIDE_PASSWORD = "1912"
 
         private fun accountZone(obj: JSONObject): String = obj.optString("zone", "Okara").ifBlank { "Okara" }
 
@@ -426,6 +425,14 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                currentUserEmail?.contains("abbasok", ignoreCase = true) == true
     }
 
+    private fun isSuperAdminUser(): Boolean {
+        val sessionManager = SessionManager(this)
+        val currentUserEmail = FirebaseAuth.getInstance().currentUser?.email
+        return sessionManager.isSuperAdmin() ||
+               currentUserEmail?.equals("abbasok@gmail.com", ignoreCase = true) == true ||
+               currentUserEmail?.contains("abbasok", ignoreCase = true) == true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_isp_panel_settings)
@@ -433,11 +440,13 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         accountsContainer = findViewById(R.id.accountsContainer)
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
 
+        val isSuper = isSuperAdminUser()
         val canManage = canUserManageIspSettings()
         val btnAdd = findViewById<Button>(R.id.btnAddIsp)
         val btnSync = findViewById<Button>(R.id.btnSyncCloud)
         val btnExp = findViewById<Button>(R.id.btnExportSettings)
         val btnImp = findViewById<Button>(R.id.btnImportSettings)
+        val filterCardLayout = findViewById<View>(R.id.filterCardLayout)
 
         if (!canManage) {
             btnAdd?.visibility = View.GONE
@@ -452,8 +461,17 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             btnImp?.setOnClickListener { importSettings() }
         }
 
-        setupCompanyFilterSpinner()
-        loadAccountsUI()
+        if (isSuper) {
+            filterCardLayout?.visibility = View.VISIBLE
+            setupCompanyFilterSpinner()
+            loadAccountsUI(null)
+        } else {
+            filterCardLayout?.visibility = View.GONE
+            val session = SessionManager(this)
+            val userComp = session.getCompanyId() ?: CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
+            loadAccountsUI(userComp)
+        }
+
         syncLocalAccountsToCloudWithFeedback(false)
     }
 
@@ -619,7 +637,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
     private fun renderAccountsList(accounts: JSONObject, companyTag: String) {
         val keys = accounts.keys()
-        val canManage = canUserManageIspSettings()
+        val isSuper = isSuperAdminUser()
 
         while (keys.hasNext()) {
             val name = keys.next()
@@ -652,7 +670,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             var isPasswordVisible = false
             val detailsTv = TextView(this).apply {
                 fun updateText() {
-                    val passDisp = if (isPasswordVisible) password else "••••••••"
+                    val passDisp = if (isSuper && isPasswordVisible) password else "••••••••"
                     text = buildString {
                         append("Username: $username\nPassword: $passDisp")
                         if (urlStr.isNotEmpty()) append("\nURL: $urlStr")
@@ -668,23 +686,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12 }
             }
 
-            val togglePassBtn = Button(this).apply {
-                text = "👁️ Show Password"
-                setBackgroundColor(Color.parseColor("#1565C0"))
-                setTextColor(Color.WHITE)
-                textSize = 12f
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = 8 }
-                setOnClickListener {
-                    isPasswordVisible = !isPasswordVisible
-                    text = if (isPasswordVisible) "🙈 Hide Password" else "👁️ Show Password"
-                    val passDisp = if (isPasswordVisible) password else "••••••••"
-                    detailsTv.text = buildString {
-                        append("Username: $username\nPassword: $passDisp")
-                        if (urlStr.isNotEmpty()) append("\nURL: $urlStr")
-                    }
-                }
-            }
-
+            val canManage = canUserManageIspSettings()
             val deleteBtn = Button(this).apply {
                 text = "Delete"
                 setBackgroundColor(Color.parseColor("#D32F2F"))
@@ -692,10 +694,34 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 textSize = 12f
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 visibility = if (canManage) View.VISIBLE else View.GONE
-                setOnClickListener { showDeleteConfirmDialog(name, zone) }
+                setOnClickListener {
+                    if (isSuperAdminUser()) {
+                        showDeleteConfirmDialog(name, zone)
+                    } else {
+                        Toast.makeText(this@IspPanelSettingsActivity, "Coming soon: Delete Account", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
 
-            btnRow.addView(togglePassBtn)
+            if (isSuper) {
+                val togglePassBtn = Button(this).apply {
+                    text = "👁️ Show Password"
+                    setBackgroundColor(Color.parseColor("#1565C0"))
+                    setTextColor(Color.WHITE)
+                    textSize = 12f
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = 8 }
+                    setOnClickListener {
+                        isPasswordVisible = !isPasswordVisible
+                        text = if (isPasswordVisible) "🙈 Hide Password" else "👁️ Show Password"
+                        val passDisp = if (isPasswordVisible) password else "••••••••"
+                        detailsTv.text = buildString {
+                            append("Username: $username\nPassword: $passDisp")
+                            if (urlStr.isNotEmpty()) append("\nURL: $urlStr")
+                        }
+                    }
+                }
+                btnRow.addView(togglePassBtn)
+            }
             btnRow.addView(deleteBtn)
 
             card.addView(titleTv)
@@ -901,6 +927,10 @@ class IspPanelSettingsActivity : AppCompatActivity() {
     }
 
     private fun showDeleteConfirmDialog(accountName: String, companyId: String? = null) {
+        if (!isSuperAdminUser()) {
+            Toast.makeText(this, "Coming soon: Delete Account", Toast.LENGTH_SHORT).show()
+            return
+        }
         val input = EditText(this).apply {
             hint = "Enter Security PIN or Password"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -912,18 +942,45 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton("Delete") { _, _ ->
                 val entered = input.text.toString().trim()
-                val jsonStr = getPrefsForCompany(this, targetComp).getString(KEY_ACCOUNTS, null) ?: "{}"
+                val prefs = getPrefsForCompany(this, targetComp)
+                val jsonStr = prefs.getString(KEY_ACCOUNTS, null) ?: "{}"
                 val all = try { JSONObject(jsonStr) } catch (_: Exception) { JSONObject() }
                 val obj = all.optJSONObject(accountName)
                 val realPassword = obj?.optString("password", "") ?: ""
 
-                if (entered == realPassword || entered == MASTER_OVERRIDE_PASSWORD) {
+                if (entered == realPassword || entered == "1912") {
                     all.remove(accountName)
-                    saveAllAccountsJson(all, targetComp)
-                    loadAccountsUI(currentFilterCompanyId)
-                    Toast.makeText(this, "Account deleted & synced.", Toast.LENGTH_SHORT).show()
+                    
+                    // Save locally first
+                    prefs.edit().putString(KEY_ACCOUNTS, all.toString()).apply()
+
+                    // Remove / update on Cloud (RTDB & Firestore) with explicit success/failure handling
+                    val cleanCompId = formatCleanCompanyId(targetComp) ?: targetComp
+                    val map = HashMap<String, Any>()
+                    map["accounts_json"] = all.toString()
+                    map["company_id"] = cleanCompId
+                    map["updated_at"] = System.currentTimeMillis()
+                    map["updated_by"] = FirebaseAuth.getInstance().currentUser?.email ?: "admin"
+
+                    val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                        .getReference("isp_panel_accounts").child(cleanCompId)
+                    val firestoreRef = FirebaseFirestore.getInstance().collection("ispPanelAccounts")
+                        .document(cleanCompId)
+
+                    rtdbRef.setValue(map).addOnSuccessListener {
+                        firestoreRef.set(map, SetOptions.merge()).addOnSuccessListener {
+                            loadAccountsUI(currentFilterCompanyId)
+                            Toast.makeText(this@IspPanelSettingsActivity, "Account '$accountName' successfully deleted from local and cloud storage.", Toast.LENGTH_LONG).show()
+                        }.addOnFailureListener { e ->
+                            Toast.makeText(this@IspPanelSettingsActivity, "Deleted locally, but cloud sync failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            loadAccountsUI(currentFilterCompanyId)
+                        }
+                    }.addOnFailureListener { e ->
+                        Toast.makeText(this@IspPanelSettingsActivity, "Cloud deletion sync failed: ${e.message}. Please check connection.", Toast.LENGTH_LONG).show()
+                    }
+
                 } else {
-                    Toast.makeText(this, "Incorrect password or pin.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Incorrect password or pin. Deletion cancelled.", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Cancel", null)

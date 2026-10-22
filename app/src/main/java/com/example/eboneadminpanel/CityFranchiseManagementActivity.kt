@@ -3,6 +3,7 @@ package com.example.superadmin
 import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
@@ -185,7 +186,7 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
             for (doc in compSnapshot.documents) {
                 val cId = doc.getString("companyId")?.trim() ?: doc.id.trim()
                 val ownerName = doc.getString("ownerName")?.trim() ?: doc.getString("companyName")?.trim() ?: ""
-                if (cId.isNotBlank()) {
+                if (cId.isNotBlank() && com.example.superadmin.core.CompanyDataHelper.isValidCompanyId(cId)) {
                     rawCompanyIds.add(cId)
                     val label = if (ownerName.isNotBlank() && !ownerName.equals(cId, true)) "$cId (Owner: $ownerName)" else cId
                     displayList.add(label)
@@ -200,6 +201,11 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
             }
             spinnerCities.adapter = adapter
 
+            val sessionActiveComp = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()?.trim()?.uppercase()
+            if (!sessionActiveComp.isNullOrBlank() && sessionActiveComp != "ALL" && rawCompanyIds.contains(sessionActiveComp)) {
+                currentCity = sessionActiveComp
+            }
+
             if (rawCompanyIds.isNotEmpty()) {
                 if (!rawCompanyIds.contains(currentCity)) {
                     currentCity = rawCompanyIds.first()
@@ -209,6 +215,17 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
                 currentCity = ""
                 containerCompanySwitches.removeAllViews()
                 containerFeatureSwitches.removeAllViews()
+            }
+
+            spinnerCities.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (position in rawCompanyIds.indices) {
+                        currentCity = rawCompanyIds[position]
+                        com.example.superadmin.core.SessionManager(this@CityFranchiseManagementActivity).saveActiveCompany(currentCity)
+                        loadCityPermissions(currentCity)
+                    }
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
         }.addOnFailureListener {
             cityList.clear()

@@ -263,88 +263,115 @@ class OfficeGeofenceActivity : AppCompatActivity() {
     private fun loadEmployeesWithAttendance() {
         val todayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
         val dp = resources.displayMetrics.density
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
 
-        db.getReference("employees").get().addOnSuccessListener { empSnap ->
-            employeeContainer.removeAllViews()
-            if (!empSnap.exists()) {
-                employeeContainer.addView(tv("No employees found", 12f, Color.parseColor("#9E9E9E")))
-                return@addOnSuccessListener
-            }
+        db.getReference("attendanceGeofence").child(compId).get().addOnSuccessListener { geoSnap ->
+            val geoLat = geoSnap.child("lat").value?.toString()?.toDoubleOrNull()
+            val geoLng = geoSnap.child("lng").value?.toString()?.toDoubleOrNull()
+            val geoRadius = geoSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
 
-            class GeofenceEmp(
-                var displayName: String,
-                var primaryDeviceId: String
-            )
-
-            val uniqueEmpMap = mutableMapOf<String, GeofenceEmp>()
-
-            for (emp in empSnap.children) {
-                if (!CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
-                val rawName = emp.child("employeeName").value?.toString()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: emp.child("name").value?.toString()
-                    ?: continue
-                val deviceId = emp.key ?: continue
-                val normName = rawName.trim().lowercase(Locale.getDefault())
-
-                val statusVal = emp.child("status").value?.toString() ?: ""
-                val existing = uniqueEmpMap.getOrPut(normName) {
-                    GeofenceEmp(displayName = rawName, primaryDeviceId = deviceId)
+            db.getReference("employees").get().addOnSuccessListener { empSnap ->
+                employeeContainer.removeAllViews()
+                if (!empSnap.exists()) {
+                    employeeContainer.addView(tv("No employees found", 12f, Color.parseColor("#9E9E9E")))
+                    return@addOnSuccessListener
                 }
 
-                if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
-                    existing.primaryDeviceId = deviceId
-                    existing.displayName = rawName
-                }
-            }
+                class GeofenceEmp(
+                    var displayName: String,
+                    var primaryDeviceId: String
+                )
 
-            for ((_, empData) in uniqueEmpMap) {
-                val deviceId = empData.primaryDeviceId
-                val name = empData.displayName
+                val uniqueEmpMap = mutableMapOf<String, GeofenceEmp>()
 
-                db.getReference("attendance").child(deviceId).child(todayKey).get()
-                    .addOnSuccessListener { attSnap ->
-                        val checkIn = attSnap.child("checkInTime").value?.toString() ?: ""
-                        val checkOut = attSnap.child("checkOutTime").value?.toString() ?: ""
-                        val status = attSnap.child("status").value?.toString() ?: ""
+                for (emp in empSnap.children) {
+                    if (!CompanyDataHelper.belongsToCurrentCompany(this, emp)) continue
+                    val rawName = emp.child("employeeName").value?.toString()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: emp.child("name").value?.toString()
+                        ?: continue
+                    val deviceId = emp.key ?: continue
+                    val normName = rawName.trim().lowercase(Locale.getDefault())
 
-                        val row = LinearLayout(this).apply {
-                            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                            setPadding(0, px(8,dp), 0, px(8,dp))
-                            background = android.graphics.drawable.ColorDrawable(Color.parseColor("#FAFAFA"))
-                            layoutParams = lp().also { it.bottomMargin = px(4,dp) }
-                        }
-
-                        val nameView = tv(name, 13f, Color.parseColor("#111111"), bold = true).also {
-                            it.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                        }
-
-                        val statusColor = when(status) {
-                            "ON_TIME" -> Color.parseColor("#2E7D32")
-                            "LATE" -> Color.parseColor("#E65100")
-                            "OVERTIME" -> Color.parseColor("#1565C0")
-                            else -> Color.parseColor("#9E9E9E")
-                        }
-                        val statusText = when {
-                            checkIn.isNotEmpty() && checkOut.isNotEmpty() -> "$checkIn → $checkOut"
-                            checkIn.isNotEmpty() -> "In: $checkIn"
-                            else -> "Not marked"
-                        }
-                        val statusView = tv(statusText, 11f, statusColor)
-
-                        row.addView(nameView)
-                        row.addView(statusView)
-
-                        val divider = View(this).apply {
-                            setBackgroundColor(Color.parseColor("#EEEEEE"))
-                            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
-                        }
-
-                        runOnUiThread {
-                            employeeContainer.addView(row)
-                            employeeContainer.addView(divider)
-                        }
+                    val statusVal = emp.child("status").value?.toString() ?: ""
+                    val existing = uniqueEmpMap.getOrPut(normName) {
+                        GeofenceEmp(displayName = rawName, primaryDeviceId = deviceId)
                     }
+
+                    if (statusVal.equals("Approved", true) || statusVal.equals("ONLINE", true)) {
+                        existing.primaryDeviceId = deviceId
+                        existing.displayName = rawName
+                    }
+                }
+
+                for ((_, empData) in uniqueEmpMap) {
+                    val deviceId = empData.primaryDeviceId
+                    val name = empData.displayName
+
+                    db.getReference("attendance").child(deviceId).child(todayKey).get()
+                        .addOnSuccessListener { attSnap ->
+                            val checkIn = attSnap.child("checkInTime").value?.toString() ?: ""
+                            val checkOut = attSnap.child("checkOutTime").value?.toString() ?: ""
+                            val status = attSnap.child("status").value?.toString() ?: ""
+
+                            val empLat = attSnap.child("latitude").value?.toString()?.toDoubleOrNull()
+                                ?: attSnap.child("checkInLatitude").value?.toString()?.toDoubleOrNull()
+                                ?: empSnap.child(deviceId).child("latitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+                            val empLng = attSnap.child("longitude").value?.toString()?.toDoubleOrNull()
+                                ?: attSnap.child("checkInLongitude").value?.toString()?.toDoubleOrNull()
+                                ?: empSnap.child(deviceId).child("longitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+
+                            var isWithinGeofence = true
+                            if (geoLat != null && geoLng != null && empLat != 0.0 && empLng != 0.0) {
+                                val dist = DistanceCalculator.distanceBetween(empLat, empLng, geoLat, geoLng)
+                                if (dist > geoRadius) {
+                                    isWithinGeofence = false
+                                }
+                            }
+
+                            val row = LinearLayout(this).apply {
+                                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                                setPadding(0, px(8,dp), 0, px(8,dp))
+                                background = android.graphics.drawable.ColorDrawable(Color.parseColor("#FAFAFA"))
+                                layoutParams = lp().also { it.bottomMargin = px(4,dp) }
+                            }
+
+                            val nameView = tv(name, 13f, Color.parseColor("#111111"), bold = true).also {
+                                it.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                            }
+
+                            val (statusText, statusColor) = when {
+                                checkIn.isNotEmpty() && !isWithinGeofence -> "❌ Outside Geofence (Rejected)" to Color.parseColor("#C62828")
+                                checkIn.isNotEmpty() && checkOut.isNotEmpty() -> "$checkIn → $checkOut" to when(status) {
+                                    "ON_TIME" -> Color.parseColor("#2E7D32")
+                                    "LATE" -> Color.parseColor("#E65100")
+                                    "OVERTIME" -> Color.parseColor("#1565C0")
+                                    else -> Color.parseColor("#2E7D32")
+                                }
+                                checkIn.isNotEmpty() -> "In: $checkIn" to when(status) {
+                                    "ON_TIME" -> Color.parseColor("#2E7D32")
+                                    "LATE" -> Color.parseColor("#E65100")
+                                    "OVERTIME" -> Color.parseColor("#1565C0")
+                                    else -> Color.parseColor("#2E7D32")
+                                }
+                                else -> "Not marked" to Color.parseColor("#9E9E9E")
+                            }
+                            val statusView = tv(statusText, 11f, statusColor)
+
+                            row.addView(nameView)
+                            row.addView(statusView)
+
+                            val divider = View(this).apply {
+                                background = android.graphics.drawable.ColorDrawable(Color.parseColor("#EEEEEE"))
+                                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+                            }
+
+                            runOnUiThread {
+                                employeeContainer.addView(row)
+                                employeeContainer.addView(divider)
+                            }
+                        }
+                }
             }
         }
     }

@@ -10,7 +10,10 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.example.superadmin.core.CompanyDataHelper
+import com.example.superadmin.core.SessionManager
 import com.google.firebase.database.*
+import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -23,6 +26,8 @@ class AppVersionActivity : AppCompatActivity() {
     private lateinit var tvOutdated: TextView
     private lateinit var tvNeverOpened: TextView
     private lateinit var tvListHeader: TextView
+    private lateinit var companySpinner: Spinner
+    private var availableCompaniesList = listOf<String>()
     private var latestVersion = ""
     private var currentFilter = "ALL"
     private var cachedDevicesSnap: DataSnapshot? = null
@@ -30,7 +35,61 @@ class AppVersionActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildLayout())
-        loadData()
+        loadCompaniesSpinner()
+    }
+
+    private fun loadCompaniesSpinner() {
+        val isSuper = CompanyDataHelper.isSuperAdmin(this)
+        if (!isSuper) {
+            val myComp = SessionManager(this).getCompanyId()?.trim()?.uppercase() ?: "OKA-001"
+            availableCompaniesList = listOf(myComp)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = false
+            companySpinner.alpha = 0.6f
+            loadData()
+            return
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection("companies").get().addOnSuccessListener { snap ->
+            val set = mutableSetOf<String>()
+            set.add("All Companies")
+            snap.documents.forEach { doc ->
+                val id = doc.id.trim().uppercase()
+                if (CompanyDataHelper.isValidCompanyId(id)) set.add(id)
+                doc.getString("companyId")?.let {
+                    val cid = it.trim().uppercase()
+                    if (CompanyDataHelper.isValidCompanyId(cid)) set.add(cid)
+                }
+            }
+            availableCompaniesList = set.toList().sorted()
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+
+            val activeComp = SessionManager(this).getActiveCompanyId() ?: "All Companies"
+            val idx = availableCompaniesList.indexOfFirst { it.equals(activeComp, true) }.coerceAtLeast(0)
+            companySpinner.setSelection(idx)
+
+            companySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p0: AdapterView<*>?, v0: View?, pos: Int, id: Long) {
+                    val comp = availableCompaniesList.getOrNull(pos) ?: return
+                    SessionManager(this@AppVersionActivity).saveActiveCompany(comp)
+                    loadData()
+                }
+                override fun onNothingSelected(p0: AdapterView<*>?) {}
+            }
+            loadData()
+        }.addOnFailureListener {
+            availableCompaniesList = listOf("All Companies", "OKA-001", "DEP-001", "DEP-002")
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompaniesList)
+            companySpinner.adapter = adapter
+            companySpinner.isEnabled = true
+            companySpinner.alpha = 1.0f
+            loadData()
+        }
     }
 
     private fun buildLayout(): View {
@@ -82,6 +141,19 @@ class AppVersionActivity : AppCompatActivity() {
             setPadding(px(12,dp), px(12,dp), px(12,dp), px(12,dp))
         }
         scroll.addView(content)
+
+        // ── Company Selector Card ──
+        val companyCard = card(dp)
+        companyCard.addView(
+            tv("Select Company / License", 12f, Color.parseColor("#757575")).also {
+                it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
+            }
+        )
+        companySpinner = Spinner(this).apply {
+            layoutParams = llp().also { it.bottomMargin = px(4, dp) }
+        }
+        companyCard.addView(companySpinner)
+        content.addView(companyCard)
 
         // Latest version info card
         val infoCard = card(dp)
@@ -162,10 +234,10 @@ class AppVersionActivity : AppCompatActivity() {
         db.getReference("ApprovedDevices").get()
             .addOnSuccessListener { snap ->
                 cachedDevicesSnap = snap
-                
+
                 val uniqueMap = mutableMapOf<String, DataSnapshot>()
                 for (device in snap.children) {
-                    if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, device)) continue
+                    if (!CompanyDataHelper.belongsToCurrentCompany(this, device)) continue
                     val rawName = device.child("employeeName").value?.toString() 
                         ?: device.child("name").value?.toString() 
                         ?: continue
@@ -198,7 +270,7 @@ class AppVersionActivity : AppCompatActivity() {
         val snap = cachedDevicesSnap ?: return
         val dp = resources.displayMetrics.density
         listContainer.removeAllViews()
-        
+
         tvListHeader.text = when(currentFilter) {
             "UP_TO_DATE" -> "Up to Date Employees"
             "OUTDATED" -> "Outdated Employees"
@@ -208,7 +280,7 @@ class AppVersionActivity : AppCompatActivity() {
 
         val uniqueMap = mutableMapOf<String, DataSnapshot>()
         for (device in snap.children) {
-            if (!com.example.superadmin.core.CompanyDataHelper.belongsToCurrentCompany(this, device)) continue
+            if (!CompanyDataHelper.belongsToCurrentCompany(this, device)) continue
             val rawName = device.child("employeeName").value?.toString() 
                 ?: device.child("name").value?.toString() 
                 ?: continue
@@ -217,7 +289,7 @@ class AppVersionActivity : AppCompatActivity() {
                 uniqueMap[normName] = device
             }
         }
-        
+
         var rowCount = 0
         for ((_, device) in uniqueMap) {
             val empName = device.child("employeeName").value?.toString() 
