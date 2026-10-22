@@ -14,12 +14,23 @@ import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListView
+import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.firebase.firestore.FirebaseFirestore
+import org.json.JSONObject
 
 /**
  * Isolated WebView flow for ZONG RENALA.
@@ -51,6 +62,9 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         private const val HOME_URL = "$DOMAIN/index.php"
         private const val DEALER_LIST_URL = "$DOMAIN/sub_dealers.php"
         private const val ZONE = "Renala"
+        private const val ZONG_PREFS = "zong_accounts_renala"
+        private const val KEY_ACCOUNTS = "accounts_json"
+        private const val KEY_ACTIVE = "active_account"
     }
 
     private val sessionPrefsName = "isp_session_cookies"
@@ -98,20 +112,14 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         sourceTransactionId = intent.getStringExtra("source_transaction_id")
         debugTapInspectorEnabled = intent.getBooleanExtra("debug_tap_inspector", false)
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
-        }
+        setContentView(R.layout.activity_webview_login)
+        window.statusBarColor = Color.parseColor("#1B5E20")
+        window.decorView.systemUiVisibility = 0
 
-        webView = WebView(this)
-        root.addView(
-            webView,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-        setContentView(root)
+        webView = findViewById(R.id.loginWebView)
+        findViewById<Button>(R.id.accountSwitchButton).setOnClickListener {
+            showAccountListDialog()
+        }
 
         configureWebView()
         loadRenalaAccount()
@@ -162,16 +170,14 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadRenalaAccount() {
-        val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", ZONE)
-        val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", ZONE)
+        val (username, password) = getZongCredentials(ZONE)
 
-        Log.e("ZONG_DEBUG", "🔍 ZongRenalaWebViewActivity -> ZONE=$ZONE, loaded username='$username' (Expected: rn-abbas046)")
+        Log.e("ZONG_DEBUG", "🔍 ZongRenalaWebViewActivity -> ZONE=$ZONE, loaded username='$username'")
         Log.d("ZongRenalaWebView", "Zong Renala → Login Started → Renala URL ($LOGIN_URL) → User: $username")
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
-            Toast.makeText(this, "Zong Renala franchise account is not configured.", Toast.LENGTH_LONG).show()
-            setResult(RESULT_CANCELED)
-            finish()
+            Log.d("ZongRenalaWebView", "Zong Renala → Account credentials missing, loading login page")
+            webView.loadUrl(LOGIN_URL)
             return
         }
 
@@ -281,8 +287,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         if (loginAttemptInProgress || loginSubmitted) return
         loginAttemptInProgress = true
 
-        val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", ZONE)
-        val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", ZONE)
+        val (username, password) = getZongCredentials(ZONE)
 
         Log.d("ZongRenalaWebView", "Zong Renala → Filling Renala credentials for user: $username")
 
@@ -516,6 +521,100 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             .replace("\"", "\\\"")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
+
+    private var activeAccountName: String = ""
+
+    private fun getZongCredentials(zone: String): Pair<String?, String?> {
+        val u = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", zone)
+        val p = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", zone)
+        if (!u.isNullOrBlank() && !p.isNullOrBlank()) {
+            return u to p
+        }
+
+        try {
+            val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+            val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+            val active = securePrefs(ZONG_PREFS).getString(KEY_ACTIVE, "") ?: ""
+            val accountName = if (active.isNotEmpty() && accounts.has(active)) active else if (accounts.keys().hasNext()) accounts.keys().next() else null
+            if (accountName != null) {
+                activeAccountName = accountName
+                val acc = accounts.getJSONObject(accountName)
+                val accUser = acc.optString("username", "")
+                val accPass = acc.optString("password", "")
+                if (accUser.isNotEmpty() && accPass.isNotEmpty()) {
+                    return accUser to accPass
+                }
+            }
+        } catch (_: Exception) {}
+
+        return u to p
+    }
+
+    private fun showAccountListDialog() {
+        val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+        val names = accounts.keys().asSequence().toList()
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_account_list, null)
+        val listView = dialogView.findViewById<ListView>(R.id.accountListView)
+        val addButton = dialogView.findViewById<Button>(R.id.addAccountButton)
+        val dialog = AlertDialog.Builder(this).setTitle("Zong Accounts (Renala)").setView(dialogView).setNegativeButton("Close", null).create()
+        val adapter = object : ArrayAdapter<String>(this, R.layout.item_account_row, names) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_account_row, parent, false)
+                val name = names[position]
+                view.findViewById<TextView>(R.id.accountNameText).text = name
+                view.findViewById<TextView>(R.id.accountStatusText).text = if (name == activeAccountName) "Active" else ""
+                view.setOnClickListener { switchToAccount(name); dialog.dismiss() }
+                view.findViewById<Button>(R.id.deleteAccountButton).setOnClickListener {
+                    val updated = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+                    updated.remove(name)
+                    securePrefs(ZONG_PREFS).edit().putString(KEY_ACCOUNTS, updated.toString()).apply()
+                    dialog.dismiss()
+                    showAccountListDialog()
+                }
+                return view
+            }
+        }
+        listView.adapter = adapter
+        addButton.setOnClickListener { dialog.dismiss(); showAddAccountDialog() }
+        dialog.show()
+    }
+
+    private fun showAddAccountDialog() {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 20, 40, 20) }
+        val ni = EditText(this).apply { hint = "Account name (e.g. Akmal)" }
+        val ui = EditText(this).apply { hint = "Zong username" }
+        val pi = EditText(this).apply { hint = "Zong password"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        layout.addView(ni); layout.addView(ui); layout.addView(pi)
+        AlertDialog.Builder(this).setTitle("Add new account").setView(layout).setPositiveButton("Save and login") { _, _ ->
+            val an = ni.text.toString().trim()
+            val u = ui.text.toString().trim()
+            val p = pi.text.toString().trim()
+            if (an.isEmpty() || u.isEmpty() || p.isEmpty()) return@setPositiveButton
+            val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+            val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+            accounts.put(an, JSONObject().apply { put("username", u); put("password", p); put("cookie", "") })
+            securePrefs(ZONG_PREFS).edit().putString(KEY_ACCOUNTS, accounts.toString()).apply()
+            activeAccountName = an
+            securePrefs(ZONG_PREFS).edit().putString(KEY_ACTIVE, an).apply()
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            loginDone = false
+            loadRenalaAccount()
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun switchToAccount(name: String) {
+        val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+        if (!accounts.has(name)) return
+        activeAccountName = name
+        securePrefs(ZONG_PREFS).edit().putString(KEY_ACTIVE, name).apply()
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        loginDone = false
+        loadRenalaAccount()
+    }
 
     private fun cleanJsResult(raw: String?): String =
         raw?.trim()?.removeSurrounding("\"")?.replace("\\\"", "\"") ?: ""

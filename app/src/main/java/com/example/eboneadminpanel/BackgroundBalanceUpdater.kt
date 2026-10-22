@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import org.json.JSONObject
 
 /**
  * Headless helper to update franchise balances in the background.
@@ -37,8 +38,38 @@ object BackgroundBalanceUpdater {
         }
         handler.postDelayed(timeoutRunnable, 45000)
 
-        val username = IspPanelSettingsActivity.getSavedUsername(context, isp, zone)
-        val password = IspPanelSettingsActivity.getSavedPassword(context, isp, zone)
+        var username = IspPanelSettingsActivity.getSavedUsername(context, isp, zone)
+        var password = IspPanelSettingsActivity.getSavedPassword(context, isp, zone)
+
+        if (username.isNullOrEmpty() || password.isNullOrEmpty()) {
+            val cleanZone = zone.trim().lowercase().replace("-", "_")
+            val prefName = when (isp.uppercase()) {
+                "EBONE" -> "ebill_accounts_$cleanZone"
+                "WATEEN" -> "wateen_accounts_$cleanZone"
+                "ZONG" -> "zong_accounts_$cleanZone"
+                "JAZZ" -> "jazz_accounts_$cleanZone"
+                else -> "${isp.lowercase()}_accounts_$cleanZone"
+            }
+            try {
+                val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+                val sp = EncryptedSharedPreferences.create(context, prefName, masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+                val raw = sp.getString("accounts_json", "") ?: ""
+                if (raw.isNotEmpty()) {
+                    val jsonObj = JSONObject(raw)
+                    val active = sp.getString("active_account", "") ?: ""
+                    val key = if (active.isNotEmpty() && jsonObj.has(active)) active else if (jsonObj.keys().hasNext()) jsonObj.keys().next() else null
+                    if (key != null) {
+                        val acc = jsonObj.getJSONObject(key)
+                        val u = acc.optString("username", "")
+                        val p = acc.optString("password", "")
+                        if (u.isNotEmpty() && p.isNotEmpty()) {
+                            username = u
+                            password = p
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
 
         if (username.isNullOrEmpty() || password.isNullOrEmpty()) {
             Log.e(TAG, "Credentials not found for $isp/$zone")
@@ -48,10 +79,29 @@ object BackgroundBalanceUpdater {
             return
         }
 
-        val loginUrl = when (isp.uppercase()) {
-            "WATEEN" -> "https://panel.wateen.com/auth.html"
-            "ZONG" -> "https://turbonet.zong.com.pk/login.php"
-            else -> "https://partner.ebill.pk/logincheck"
+        // Restore Cookies
+        val savedCookie = getIspSessionCookie(context, isp, zone)
+        val domain = when (isp.uppercase()) {
+            "WATEEN" -> "https://panel.wateen.com"
+            "ZONG" -> "https://turbonet.zong.com.pk"
+            "JAZZ" -> "https://biz.jazzftth.pk"
+            else -> "https://partner.ebill.pk"
+        }
+
+        val loginUrl = if (savedCookie.isNotEmpty()) {
+            when (isp.uppercase()) {
+                "WATEEN" -> "https://panel.wateen.com/user/user/all"
+                "ZONG" -> "https://turbonet.zong.com.pk/index.php"
+                "JAZZ" -> "https://biz.jazzftth.pk/dashboard"
+                else -> "https://partner.ebill.pk/clients"
+            }
+        } else {
+            when (isp.uppercase()) {
+                "WATEEN" -> "https://panel.wateen.com/auth.html"
+                "ZONG" -> "https://turbonet.zong.com.pk/login.php"
+                "JAZZ" -> "https://biz.jazzftth.pk/users/login"
+                else -> "https://partner.ebill.pk/logincheck"
+            }
         }
 
         handler.post {
@@ -66,18 +116,10 @@ object BackgroundBalanceUpdater {
                 webView.settings.userAgentString = "Mozilla/5.0 (Linux; Android 6.0) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
             }
 
-            // Restore Cookies
-            val savedCookie = getIspSessionCookie(context, isp, zone)
-            val domain = when (isp.uppercase()) {
-                "WATEEN" -> "https://panel.wateen.com"
-                "ZONG" -> "https://turbonet.zong.com.pk"
-                else -> "https://partner.ebill.pk"
-            }
-
-            // Isolated cleanup before restoring session cookie
+            // Restore session cookies
             val cm = CookieManager.getInstance()
-            cm.removeAllCookies(null)
-            cm.flush()
+            cm.setAcceptCookie(true)
+            cm.setAcceptThirdPartyCookies(webView, true)
 
             if (savedCookie.isNotEmpty()) {
                 savedCookie.split(";").forEach { part ->
@@ -94,12 +136,12 @@ object BackgroundBalanceUpdater {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     if (isFinished || url == null) return
                     
-                    val domain = when (isp.uppercase()) {
+                    val currentDomain = when (isp.uppercase()) {
                         "WATEEN" -> "https://panel.wateen.com"
                         "ZONG" -> "https://turbonet.zong.com.pk"
                         else -> "https://partner.ebill.pk"
                     }
-                    val currentCookie = CookieManager.getInstance().getCookie(domain)
+                    val currentCookie = CookieManager.getInstance().getCookie(currentDomain)
                     if (!currentCookie.isNullOrEmpty()) {
                         saveIspSessionCookie(context, isp, zone, currentCookie)
                     }
@@ -110,12 +152,16 @@ object BackgroundBalanceUpdater {
                             Log.d(TAG, "Attempting background login for $isp/$zone")
                             val script = """
                                 (function(){
-                                    var u = document.querySelector('input[name=username], input[name=email], #username');
-                                    var p = document.querySelector('input[name=password], #password');
-                                    var b = document.querySelector('button[type=submit], input[type=submit], #send, .btn-primary');
+                                    var u = document.querySelector('input[name=username], input[name=email], #username, input[type=text]');
+                                    var p = document.querySelector('input[name=password], #password, input[type=password]');
+                                    var b = document.querySelector('button[type=submit], input[type=submit], #send, .btn-primary, .btn-login');
                                     if(u && p && b){
                                         u.value = '$username';
+                                        u.dispatchEvent(new Event('input', {bubbles: true}));
+                                        u.dispatchEvent(new Event('change', {bubbles: true}));
                                         p.value = '$password';
+                                        p.dispatchEvent(new Event('input', {bubbles: true}));
+                                        p.dispatchEvent(new Event('change', {bubbles: true}));
                                         b.click();
                                         return 'clicked';
                                     }
@@ -138,12 +184,12 @@ object BackgroundBalanceUpdater {
                                     onComplete(balance)
                                 } else {
                                     // Retry logic for dynamic rendering
-                                    if (readRetryCount < 8) {
+                                    if (readRetryCount < 12) {
                                         readRetryCount++
                                         Log.d(TAG, "Balance not found, retry $readRetryCount for $isp")
                                         handler.postDelayed({
                                             if (!isFinished) onPageFinished(webView, webView.url)
-                                        }, 1500)
+                                        }, 300L)
                                     } else {
                                         // Final attempt failed
                                         if (isp.uppercase() == "WATEEN" && !url.contains("accounting/mybalance")) {
@@ -168,14 +214,21 @@ object BackgroundBalanceUpdater {
             "EBONE" -> """
                 (function(){
                     var footer = document.querySelector('.dropdown-menu li.footer');
-                    var text = footer ? footer.innerText : '';
+                    var text = footer ? (footer.innerText || footer.textContent || '') : '';
                     if (text && text.indexOf('Balance') > -1) {
-                        var m = text.match(/Balance:\s*(-?[0-9.,]+)/);
-                        return m ? m[1] : null;
+                        var m = text.match(/Balance:\s*(-?[0-9.,]+)/i);
+                        if (m) return m[1];
                     }
+                    var bodyText = document.body ? (document.body.innerText || '') : '';
+                    var bm = bodyText.match(/Balance:\s*(-?[0-9.,]+)/i);
+                    if (bm) return bm[1];
+
                     var icon = document.querySelector('i.fa-dollar') || document.querySelector('.fa-dollar');
                     var link = icon ? icon.closest('a') : null;
-                    if (link) { link.click(); return 'waiting'; }
+                    if (link) {
+                        link.click();
+                        return 'waiting';
+                    }
                     return null;
                 })()
             """.trimIndent()

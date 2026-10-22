@@ -218,7 +218,7 @@ class CompanyRepository {
             }
 
             val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference()
-            val masterNodes = listOf("employees", "ApprovedDevices", "employeePins", "attendance", "tracking", "complaints")
+            val masterNodes = listOf("employees", "ApprovedDevices", "employeePins", "attendance", "tracking")
             for (node in masterNodes) {
                 rtdbRef.child(node).get().addOnSuccessListener { nodeSnap ->
                     for (child in nodeSnap.children) {

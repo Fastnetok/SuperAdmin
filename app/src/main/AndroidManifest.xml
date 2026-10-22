@@ -102,7 +102,10 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".SetPinActivity" android:exported="false" />
+        <activity
+            android:name=".SetPinActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
         <activity android:name=".UnlockActivity" android:exported="false" />
 
         <activity

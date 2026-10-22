@@ -283,9 +283,9 @@ class WateenWebViewActivity : AppCompatActivity() {
             return
         }
 
-        val rawAccounts = securePrefs(WATEEN_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val rawAccounts = securePrefs(getWateenPrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
         val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-        val active = securePrefs(WATEEN_PREFS).getString(KEY_ACTIVE, "") ?: ""
+        val active = securePrefs(getWateenPrefsName()).getString(KEY_ACTIVE, "") ?: ""
         if (active.isNotEmpty() && accounts.has(active)) {
             activeAccountName = active
             val acc = accounts.getJSONObject(active)
@@ -408,14 +408,20 @@ class WateenWebViewActivity : AppCompatActivity() {
         }
     }
 
+    private fun getWateenPrefsName(): String {
+        val cleanZone = targetZone.trim().lowercase().replace("-", "_")
+        return "wateen_accounts_$cleanZone"
+    }
+
     private fun showAccountListDialog() {
-        val raw = securePrefs(WATEEN_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val prefsName = getWateenPrefsName()
+        val raw = securePrefs(prefsName).getString(KEY_ACCOUNTS, "") ?: ""
         val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
         val names = accounts.keys().asSequence().toList()
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_account_list, null)
         val listView = dialogView.findViewById<ListView>(R.id.accountListView)
         val addButton = dialogView.findViewById<Button>(R.id.addAccountButton)
-        val dialog = AlertDialog.Builder(this).setTitle("Wateen Accounts").setView(dialogView).setNegativeButton("Close", null).create()
+        val dialog = AlertDialog.Builder(this).setTitle("Wateen Accounts ($targetZone)").setView(dialogView).setNegativeButton("Close", null).create()
         val adapter = object : ArrayAdapter<String>(this, R.layout.item_account_row, names) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_account_row, parent, false)
@@ -426,7 +432,7 @@ class WateenWebViewActivity : AppCompatActivity() {
                 view.findViewById<Button>(R.id.deleteAccountButton).setOnClickListener {
                     val updated = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
                     updated.remove(name)
-                    securePrefs(WATEEN_PREFS).edit().putString(KEY_ACCOUNTS, updated.toString()).apply()
+                    securePrefs(prefsName).edit().putString(KEY_ACCOUNTS, updated.toString()).apply()
                     dialog.dismiss()
                     showAccountListDialog()
                 }
@@ -439,6 +445,7 @@ class WateenWebViewActivity : AppCompatActivity() {
     }
 
     private fun showAddAccountDialog() {
+        val prefsName = getWateenPrefsName()
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 20, 40, 20) }
         val ni = EditText(this).apply { hint = "Account name (e.g. Akmal)" }
         val ui = EditText(this).apply { hint = "Wateen username" }
@@ -449,12 +456,12 @@ class WateenWebViewActivity : AppCompatActivity() {
             val u = ui.text.toString().trim()
             val p = pi.text.toString().trim()
             if (an.isEmpty() || u.isEmpty() || p.isEmpty()) return@setPositiveButton
-            val raw = securePrefs(WATEEN_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+            val raw = securePrefs(prefsName).getString(KEY_ACCOUNTS, "") ?: ""
             val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
             accounts.put(an, JSONObject().apply { put("username", u); put("password", p); put("cookie", "") })
-            securePrefs(WATEEN_PREFS).edit().putString(KEY_ACCOUNTS, accounts.toString()).apply()
+            securePrefs(prefsName).edit().putString(KEY_ACCOUNTS, accounts.toString()).apply()
             activeAccountName = an
-            securePrefs(WATEEN_PREFS).edit().putString(KEY_ACTIVE, an).apply()
+            securePrefs(prefsName).edit().putString(KEY_ACTIVE, an).apply()
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
             loginDone = false
@@ -463,7 +470,8 @@ class WateenWebViewActivity : AppCompatActivity() {
     }
 
     private fun switchToAccount(name: String) {
-        val raw = securePrefs(WATEEN_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val prefsName = getWateenPrefsName()
+        val raw = securePrefs(prefsName).getString(KEY_ACCOUNTS, "") ?: ""
         val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
         if (!accounts.has(name)) return
         val acc = accounts.getJSONObject(name)
@@ -471,7 +479,7 @@ class WateenWebViewActivity : AppCompatActivity() {
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         activeAccountName = name
-        securePrefs(WATEEN_PREFS).edit().putString(KEY_ACTIVE, name).apply()
+        securePrefs(prefsName).edit().putString(KEY_ACTIVE, name).apply()
         if (cookie.isNotEmpty()) {
             CookieManager.getInstance().setCookie("https://panel.wateen.com", cookie)
             CookieManager.getInstance().flush()

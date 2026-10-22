@@ -265,10 +265,7 @@ class OfficeGeofenceActivity : AppCompatActivity() {
         val dp = resources.displayMetrics.density
         val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
 
-        db.getReference("attendanceGeofence").child(compId).get().addOnSuccessListener { geoSnap ->
-            val geoLat = geoSnap.child("lat").value?.toString()?.toDoubleOrNull()
-            val geoLng = geoSnap.child("lng").value?.toString()?.toDoubleOrNull()
-            val geoRadius = geoSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+        fetchGeofenceData(compId) { geoLat, geoLng, geoRadius ->
 
             db.getReference("employees").get().addOnSuccessListener { empSnap ->
                 employeeContainer.removeAllViews()
@@ -341,7 +338,7 @@ class OfficeGeofenceActivity : AppCompatActivity() {
                             }
 
                             val (statusText, statusColor) = when {
-                                checkIn.isNotEmpty() && !isWithinGeofence -> "❌ Outside Geofence (Rejected)" to Color.parseColor("#C62828")
+                                checkIn.isNotEmpty() && !isWithinGeofence -> "Not at office or not at complain location" to Color.parseColor("#C62828")
                                 checkIn.isNotEmpty() && checkOut.isNotEmpty() -> "$checkIn → $checkOut" to when(status) {
                                     "ON_TIME" -> Color.parseColor("#2E7D32")
                                     "LATE" -> Color.parseColor("#E65100")
@@ -378,30 +375,50 @@ class OfficeGeofenceActivity : AppCompatActivity() {
 
     private fun loadCurrentGeofence() {
         val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
-        db.getReference("attendanceGeofence").child(compId).get().addOnSuccessListener { snap ->
-            val lat = snap.child("lat").value?.toString() ?: ""
-            val lng = snap.child("lng").value?.toString() ?: ""
-            val radius = snap.child("radius").value?.toString() ?: ""
-            if (lat.isEmpty()) {
-                db.getReference("attendanceGeofence").get().addOnSuccessListener { rootSnap ->
-                    val rLat = rootSnap.child("lat").value?.toString() ?: ""
-                    val rLng = rootSnap.child("lng").value?.toString() ?: ""
-                    val rRadius = rootSnap.child("radius").value?.toString() ?: ""
-                    if (rLat.isEmpty()) {
-                        tvCurrentSettings.text = "No geofence set yet for $compId"
-                        tvCurrentSettings.setTextColor(Color.parseColor("#9E9E9E"))
-                    } else {
-                        tvCurrentSettings.text = "Lat: $rLat\nLng: $rLng\nRadius: ${rRadius}m ($compId)"
-                        tvCurrentSettings.setTextColor(Color.parseColor("#2E7D32"))
-                        etLat.setText(rLat); etLng.setText(rLng); etRadius.setText(rRadius)
-                    }
-                }
+        fetchGeofenceData(compId) { lat, lng, radius ->
+            if (lat == null || lng == null) {
+                tvCurrentSettings.text = "No geofence set yet for $compId"
+                tvCurrentSettings.setTextColor(Color.parseColor("#9E9E9E"))
             } else {
-                tvCurrentSettings.text = "Lat: $lat\nLng: $lng\nRadius: ${radius}m ($compId)"
+                tvCurrentSettings.text = "Lat: $lat\nLng: $lng\nRadius: ${radius.toInt()}m ($compId)"
                 tvCurrentSettings.setTextColor(Color.parseColor("#2E7D32"))
-                etLat.setText(lat); etLng.setText(lng); etRadius.setText(radius)
+                etLat.setText("$lat"); etLng.setText("$lng"); etRadius.setText("${radius.toInt()}")
             }
         }
+    }
+
+    private fun fetchGeofenceData(compId: String, onGeoLoaded: (lat: Double?, lng: Double?, radius: Double) -> Unit) {
+        val cleanCompId = compId.trim().uppercase()
+        val altCompId = if (cleanCompId.contains("-")) cleanCompId.replace("-", "") else {
+            if (cleanCompId.length > 3) cleanCompId.substring(0, 3) + "-" + cleanCompId.substring(3) else cleanCompId
+        }
+
+        db.getReference("attendanceGeofence").child(cleanCompId).get().addOnSuccessListener { geoSnap ->
+            var lat = geoSnap.child("lat").value?.toString()?.toDoubleOrNull()
+            var lng = geoSnap.child("lng").value?.toString()?.toDoubleOrNull()
+            var radius = geoSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+
+            if (lat != null && lng != null) {
+                onGeoLoaded(lat, lng, radius)
+            } else {
+                db.getReference("attendanceGeofence").child(altCompId).get().addOnSuccessListener { altSnap ->
+                    lat = altSnap.child("lat").value?.toString()?.toDoubleOrNull()
+                    lng = altSnap.child("lng").value?.toString()?.toDoubleOrNull()
+                    radius = altSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+
+                    if (lat != null && lng != null) {
+                        onGeoLoaded(lat, lng, radius)
+                    } else {
+                        db.getReference("attendanceGeofence").get().addOnSuccessListener { rootSnap ->
+                            val rootLat = rootSnap.child("lat").value?.toString()?.toDoubleOrNull()
+                            val rootLng = rootSnap.child("lng").value?.toString()?.toDoubleOrNull()
+                            val rootRadius = rootSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+                            onGeoLoaded(rootLat, rootLng, rootRadius)
+                        }.addOnFailureListener { onGeoLoaded(null, null, 100.0) }
+                    }
+                }.addOnFailureListener { onGeoLoaded(null, null, 100.0) }
+            }
+        }.addOnFailureListener { onGeoLoaded(null, null, 100.0) }
     }
 
     private fun copyFromDashboardGeofence() {
@@ -428,7 +445,21 @@ class OfficeGeofenceActivity : AppCompatActivity() {
         if (radius == null || radius <= 0) { showMsg("Valid radius required."); return }
 
         val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
-        db.getReference("attendanceGeofence").child(compId).setValue(mapOf("lat" to lat, "lng" to lng, "radius" to radius))
+        val cleanCompId = compId.trim().uppercase()
+        val altCompId = if (cleanCompId.contains("-")) cleanCompId.replace("-", "") else {
+            if (cleanCompId.length > 3) cleanCompId.substring(0, 3) + "-" + cleanCompId.substring(3) else cleanCompId
+        }
+
+        val data = mapOf("lat" to lat, "lng" to lng, "radius" to radius)
+
+        val updates = mutableMapOf<String, Any>(
+            "attendanceGeofence/$cleanCompId" to data,
+            "attendanceGeofence/$altCompId" to data,
+            "attendanceGeofence/active" to data,
+            "dashboardGeofences/active" to data
+        )
+
+        db.reference.updateChildren(updates)
             .addOnSuccessListener {
                 tvStatus.text = "Saved for $compId! Lat: $lat, Lng: $lng, Radius: ${radius.toInt()}m"
                 tvStatus.setTextColor(Color.parseColor("#2E7D32"))

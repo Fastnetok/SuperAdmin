@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.firebase.database.*
+import com.example.superadmin.core.CompanyDataHelper
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -58,6 +59,19 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         adapter = EmployeeComplaintAdapter(complaintList)
         recyclerView.adapter = adapter
 
+        val swipeRefreshLayout = findViewById<androidx.swiperefreshlayout.widget.SwipeRefreshLayout>(R.id.swipeRefreshLayout)
+        swipeRefreshLayout.setOnRefreshListener {
+            adapter.onlineStatusMap.clear()
+            eboneQueue.clear()
+            wateenQueue.clear()
+            zongQueue.clear()
+            eboneChecking = false
+            wateenChecking = false
+            zongChecking = false
+            loadComplaints(employeeName)
+            swipeRefreshLayout.isRefreshing = false
+        }
+
         loadComplaints(employeeName)
     }
 
@@ -68,6 +82,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     complaintList.clear()
                     for (item in snapshot.children) {
+                        if (!CompanyDataHelper.belongsToCurrentCompany(this@EmployeeComplaintsActivity, item)) continue
                         val complaint = item.getValue(Complaint::class.java) ?: continue
                         val assignedNorm = complaint.assignedTo.trim().lowercase(Locale.getDefault())
                         if (assignedNorm == targetNorm &&

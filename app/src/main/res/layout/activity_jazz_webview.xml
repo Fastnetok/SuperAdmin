@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -16,15 +17,38 @@
         android:elevation="4dp"
         android:layout_margin="8dp">
 
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Jazz ISP Franchise Panel - Auto Login"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            android:textColor="#C62828"
-            android:gravity="center"
-            android:layout_marginBottom="6dp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Jazz ISP Franchise Panel"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#C62828" />
+
+            <Button
+                android:id="@+id/accountSwitchButton"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:minHeight="0dp"
+                android:minWidth="0dp"
+                android:text="Account"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#C62828"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:includeFontPadding="false"
+                android:stateListAnimator="@null" />
+
+        </LinearLayout>
 
         <!-- Credentials Inputs -->
         <LinearLayout

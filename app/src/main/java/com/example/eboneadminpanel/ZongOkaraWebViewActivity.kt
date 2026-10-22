@@ -2,6 +2,7 @@ package com.example.superadmin
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
@@ -11,12 +12,23 @@ import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ListView
+import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.firebase.firestore.FirebaseFirestore
+import org.json.JSONObject
 import java.util.Locale
 
 /**
@@ -84,7 +96,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         webView = findViewById(R.id.loginWebView)
 
         findViewById<Button>(R.id.accountSwitchButton).setOnClickListener {
-            Toast.makeText(this, "Zong Okara account is controlled from ISP Panel Settings.", Toast.LENGTH_SHORT).show()
+            showAccountListDialog()
         }
 
         CookieManager.getInstance().setAcceptCookie(true)
@@ -368,11 +380,36 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         }
     }
 
+    private fun getZongCredentials(zone: String): Pair<String?, String?> {
+        val u = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", zone)
+        val p = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", zone)
+        if (!u.isNullOrBlank() && !p.isNullOrBlank()) {
+            return u to p
+        }
+
+        try {
+            val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+            val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+            val active = securePrefs(ZONG_PREFS).getString(KEY_ACTIVE, "") ?: ""
+            val accountName = if (active.isNotEmpty() && accounts.has(active)) active else if (accounts.keys().hasNext()) accounts.keys().next() else null
+            if (accountName != null) {
+                activeAccountName = accountName
+                val acc = accounts.getJSONObject(accountName)
+                val accUser = acc.optString("username", "")
+                val accPass = acc.optString("password", "")
+                if (accUser.isNotEmpty() && accPass.isNotEmpty()) {
+                    return accUser to accPass
+                }
+            }
+        } catch (_: Exception) {}
+
+        return u to p
+    }
+
     private fun loadInitialPage() {
-        val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
-        val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", "Okara")
+        val (username, password) = getZongCredentials("Okara")
         
-        Log.e("ZONG_DEBUG", "🔍 ZongOkaraWebViewActivity -> ZONE=Okara, loaded username='$username' (Expected: abbas046)")
+        Log.e("ZONG_DEBUG", "🔍 ZongOkaraWebViewActivity -> ZONE=Okara, loaded username='$username'")
         Log.d("ZongOkaraWebView", "Zong Okara → Login Started → Okara URL ($loginUrl) → User: $username")
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
@@ -411,8 +448,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         if (loginAttemptInProgress) return
         loginAttemptInProgress = true
 
-        val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
-        val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", "Okara")
+        val (username, password) = getZongCredentials("Okara")
 
         Log.d("ZongOkaraWebView", "Zong Okara → Filling Okara credentials for user: $username")
 
@@ -572,5 +608,88 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
 
     private object JSONObjectEscape {
         fun forJavaScript(value: String): String = value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
+    }
+
+    companion object {
+        private const val ZONG_PREFS = "zong_accounts_okara"
+        private const val KEY_ACCOUNTS = "accounts_json"
+        private const val KEY_ACTIVE = "active_account"
+    }
+
+    private var activeAccountName: String = ""
+
+    private fun securePrefs(name: String): SharedPreferences {
+        val mk = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        return try {
+            EncryptedSharedPreferences.create(this, name, mk, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        } catch (e: Exception) {
+            getSharedPreferences(name, MODE_PRIVATE)
+        }
+    }
+
+    private fun showAccountListDialog() {
+        val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+        val names = accounts.keys().asSequence().toList()
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_account_list, null)
+        val listView = dialogView.findViewById<ListView>(R.id.accountListView)
+        val addButton = dialogView.findViewById<Button>(R.id.addAccountButton)
+        val dialog = AlertDialog.Builder(this).setTitle("Zong Accounts").setView(dialogView).setNegativeButton("Close", null).create()
+        val adapter = object : ArrayAdapter<String>(this, R.layout.item_account_row, names) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_account_row, parent, false)
+                val name = names[position]
+                view.findViewById<TextView>(R.id.accountNameText).text = name
+                view.findViewById<TextView>(R.id.accountStatusText).text = if (name == activeAccountName) "Active" else ""
+                view.setOnClickListener { switchToAccount(name); dialog.dismiss() }
+                view.findViewById<Button>(R.id.deleteAccountButton).setOnClickListener {
+                    val updated = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+                    updated.remove(name)
+                    securePrefs(ZONG_PREFS).edit().putString(KEY_ACCOUNTS, updated.toString()).apply()
+                    dialog.dismiss()
+                    showAccountListDialog()
+                }
+                return view
+            }
+        }
+        listView.adapter = adapter
+        addButton.setOnClickListener { dialog.dismiss(); showAddAccountDialog() }
+        dialog.show()
+    }
+
+    private fun showAddAccountDialog() {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 20, 40, 20) }
+        val ni = EditText(this).apply { hint = "Account name (e.g. Akmal)" }
+        val ui = EditText(this).apply { hint = "Zong username" }
+        val pi = EditText(this).apply { hint = "Zong password"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        layout.addView(ni); layout.addView(ui); layout.addView(pi)
+        AlertDialog.Builder(this).setTitle("Add new account").setView(layout).setPositiveButton("Save and login") { _, _ ->
+            val an = ni.text.toString().trim()
+            val u = ui.text.toString().trim()
+            val p = pi.text.toString().trim()
+            if (an.isEmpty() || u.isEmpty() || p.isEmpty()) return@setPositiveButton
+            val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+            val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+            accounts.put(an, JSONObject().apply { put("username", u); put("password", p); put("cookie", "") })
+            securePrefs(ZONG_PREFS).edit().putString(KEY_ACCOUNTS, accounts.toString()).apply()
+            activeAccountName = an
+            securePrefs(ZONG_PREFS).edit().putString(KEY_ACTIVE, an).apply()
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            loginDone = false
+            loadInitialPage()
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun switchToAccount(name: String) {
+        val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+        if (!accounts.has(name)) return
+        activeAccountName = name
+        securePrefs(ZONG_PREFS).edit().putString(KEY_ACTIVE, name).apply()
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        loginDone = false
+        loadInitialPage()
     }
 }

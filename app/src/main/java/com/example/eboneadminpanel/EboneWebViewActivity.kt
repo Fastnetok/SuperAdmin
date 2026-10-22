@@ -14,8 +14,18 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ListView
+import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -104,8 +114,7 @@ class EboneWebViewActivity : AppCompatActivity() {
         webView = findViewById(R.id.loginWebView)
 
         findViewById<Button>(R.id.accountSwitchButton).setOnClickListener {
-            // Placeholder: Ebone specific account switching if needed
-            Toast.makeText(this, "Switching Ebone accounts not implemented here.", Toast.LENGTH_SHORT).show()
+            showAccountListDialog()
         }
 
         configureWebView()
@@ -263,28 +272,21 @@ class EboneWebViewActivity : AppCompatActivity() {
             return
         }
 
-        // Purge any stale cookies from other ISP / Zone sessions
-
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp, targetZone)
-        if (!ispUsername.isNullOrEmpty()) {
-            val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("${selectedIsp}_$targetZone", "") ?: ""
-            if (savedCookie.isNotEmpty()) {
-                Log.d("EboneWebView", "Loading with saved cookie for $selectedIsp / $targetZone")
-                val domainUrl = "https://partner.ebill.pk"
-                savedCookie.split(";").forEach {
-                    if (it.isNotBlank()) CookieManager.getInstance().setCookie(domainUrl, it.trim())
-                }
-                CookieManager.getInstance().flush()
-                webView.loadUrl("$domainUrl/clients")
-            } else {
-                webView.loadUrl("https://partner.ebill.pk/logincheck")
+        val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("EBONE_$targetZone", "") ?: ""
+        if (savedCookie.isNotEmpty()) {
+            Log.d("EboneWebView", "Loading with saved cookie for EBONE / $targetZone")
+            val domainUrl = "https://partner.ebill.pk"
+            savedCookie.split(";").forEach {
+                if (it.isNotBlank()) CookieManager.getInstance().setCookie(domainUrl, it.trim())
             }
+            CookieManager.getInstance().flush()
+            webView.loadUrl("$domainUrl/clients")
             return
         }
 
-        val rawAccounts = securePrefs(PREFS_NAME).getString(KEY_ACCOUNTS, "") ?: ""
+        val rawAccounts = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
         val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-        val active = securePrefs(PREFS_NAME).getString(KEY_ACTIVE, "") ?: ""
+        val active = securePrefs(getEbonePrefsName()).getString(KEY_ACTIVE, "") ?: ""
 
         if (active.isNotEmpty() && accounts.has(active)) {
             val acc = accounts.getJSONObject(active)
@@ -293,45 +295,92 @@ class EboneWebViewActivity : AppCompatActivity() {
                 CookieManager.getInstance().setCookie("https://partner.ebill.pk", cookie)
                 CookieManager.getInstance().flush()
                 webView.loadUrl("https://partner.ebill.pk/clients")
-            } else {
-                webView.loadUrl("https://partner.ebill.pk/logincheck")
+                return
             }
-        } else {
-            webView.loadUrl("https://partner.ebill.pk/logincheck")
         }
+
+        webView.loadUrl("https://partner.ebill.pk/logincheck")
     }
 
     private fun tryAutoLogin() {
         if (loginAttemptInProgress) return
         loginAttemptInProgress = true
 
-        if (manualAction != "DEALER_TOPUP" && !forceAccountName.isNullOrBlank()) {
+        // 1. Check if an account was explicitly added/selected via popup dialog
+        if (!forcedDealerUsername.isNullOrBlank() && !forcedDealerPassword.isNullOrBlank()) {
+            doLoginWith(forcedDealerUsername!!, forcedDealerPassword!!)
+            return
+        }
+
+        // 2. Check if a named account was selected or passed in intent
+        if (!forceAccountName.isNullOrBlank()) {
             val dealerUsername = IspPanelSettingsActivity.getDealerUsername(this, "EBONE", targetZone, forceAccountName!!)
             val dealerPassword = IspPanelSettingsActivity.getDealerPassword(this, "EBONE", targetZone, forceAccountName!!)
             if (!dealerUsername.isNullOrEmpty() && !dealerPassword.isNullOrEmpty()) {
                 doLoginWith(dealerUsername, dealerPassword)
                 return
             }
+
+            val rawAccounts = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
+            val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
+            if (accounts.has(forceAccountName)) {
+                val acc = accounts.getJSONObject(forceAccountName!!)
+                val u = acc.optString("username", "")
+                val p = acc.optString("password", "")
+                if (u.isNotEmpty() && p.isNotEmpty()) {
+                    doLoginWith(u, p)
+                    return
+                }
+            }
         }
 
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() } ?: "FASTNET"
-        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() } ?: "fastnet123"
-        doLoginWith(ispUsername, ispPassword)
-        return
+        // 3. Check ISP Panel Settings for this zone
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() }
+        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() }
+        if (!ispUsername.isNullOrBlank() && !ispPassword.isNullOrBlank()) {
+            doLoginWith(ispUsername, ispPassword)
+            return
+        }
+
+        // 4. Check active account from local zone-scoped accounts
+        val rawAccounts = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
+        val active = securePrefs(getEbonePrefsName()).getString(KEY_ACTIVE, "") ?: ""
+        val accountName = if (active.isNotEmpty() && accounts.has(active)) active else if (accounts.keys().hasNext()) accounts.keys().next() else null
+        if (accountName != null && accounts.has(accountName)) {
+            val acc = accounts.getJSONObject(accountName)
+            val u = acc.optString("username", "")
+            val p = acc.optString("password", "")
+            if (u.isNotEmpty() && p.isNotEmpty()) {
+                doLoginWith(u, p)
+                return
+            }
+        }
+
+        loginAttemptInProgress = false
     }
 
+    private fun escapeJs(v: String): String =
+        v.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+
     private fun doLoginWith(username: String, password: String, attempt: Int = 1) {
+        val safeU = escapeJs(username)
+        val safeP = escapeJs(password)
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
-                        "  var u = document.querySelector('input[type=text],input[name=username],input[name=email],#username,#email');" +
-                        "  var p = document.querySelector('input[type=password],#password');" +
-                        "  var b = document.querySelector('#send,button[type=submit],input[type=submit],.btn-login,#login-btn');" +
+                        "  var u = document.querySelector('input[name=username],input[name=email],#username,#email,input[type=text]');" +
+                        "  var p = document.querySelector('input[name=password],#password,input[type=password]');" +
+                        "  var b = document.querySelector('button[type=submit],input[type=submit],#send,.btn-primary,.btn-login,#login-btn');" +
                         "  if(!u || !p){ return 'fields_not_ready'; }" +
-                        "  u.value='" + username + "';" +
+                        "  u.value='" + safeU + "';" +
                         "  u.dispatchEvent(new Event('input',{bubbles:true}));" +
                         "  u.dispatchEvent(new Event('change',{bubbles:true}));" +
-                        "  p.value='" + password + "';" +
+                        "  p.value='" + safeP + "';" +
                         "  p.dispatchEvent(new Event('input',{bubbles:true}));" +
                         "  p.dispatchEvent(new Event('change',{bubbles:true}));" +
                         "  if(b){ b.click(); return 'submitted'; }" +
@@ -343,7 +392,7 @@ class EboneWebViewActivity : AppCompatActivity() {
                     doLoginWith(username, password, attempt + 1)
                 } else {
                     loginAttemptInProgress = false
-                    Log.d("EboneWebView", "Login submission attempted. Waiting for dashboard...")
+                    Log.d("EboneWebView", "Login submission attempted with user '$username'. Waiting for dashboard...")
                 }
             }
         }, 300L)
@@ -687,5 +736,104 @@ class EboneWebViewActivity : AppCompatActivity() {
                 }, 4000)
             }
         }
+    }
+
+    private fun getEbonePrefsName(): String {
+        val cleanZone = targetZone.trim().lowercase().replace("-", "_")
+        return "ebill_accounts_$cleanZone"
+    }
+
+    private fun loadAccounts(): JSONObject {
+        val raw = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
+        return if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+    }
+
+    private fun saveAccounts(accounts: JSONObject) {
+        securePrefs(getEbonePrefsName()).edit().putString(KEY_ACCOUNTS, accounts.toString()).apply()
+    }
+
+    private fun showAccountListDialog() {
+        val accounts = loadAccounts()
+        val names = accounts.keys().asSequence().toList()
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_account_list, null)
+        val listView = dialogView.findViewById<ListView>(R.id.accountListView)
+        val addButton = dialogView.findViewById<Button>(R.id.addAccountButton)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Ebone Accounts ($targetZone)").setView(dialogView).setNegativeButton("Close", null).create()
+        val adapter = object : ArrayAdapter<String>(this, R.layout.item_account_row, names) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_account_row, parent, false)
+                val name = names[position]
+                view.findViewById<TextView>(R.id.accountNameText).text = name
+                view.findViewById<TextView>(R.id.accountStatusText).text = if (name == forceAccountName) "Active" else ""
+                view.setOnClickListener {
+                    switchToAccount(name)
+                    dialog.dismiss()
+                }
+                view.findViewById<Button>(R.id.deleteAccountButton).setOnClickListener {
+                    val updated = loadAccounts()
+                    updated.remove(name)
+                    saveAccounts(updated)
+                    dialog.dismiss()
+                    showAccountListDialog()
+                }
+                return view
+            }
+        }
+        listView.adapter = adapter
+        addButton.setOnClickListener { dialog.dismiss(); showAddAccountDialog() }
+        dialog.show()
+    }
+
+    private fun showAddAccountDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 20, 40, 20)
+        }
+        val nameInput = EditText(this).apply { hint = "Account name (e.g. Akmal)" }
+        val userInput = EditText(this).apply { hint = "ebill.pk username" }
+        val passInput = EditText(this).apply {
+            hint = "ebill.pk password"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        layout.addView(nameInput); layout.addView(userInput); layout.addView(passInput)
+        AlertDialog.Builder(this)
+            .setTitle("Add new account").setView(layout)
+            .setPositiveButton("Save and login") { _, _ ->
+                val accName = nameInput.text.toString().trim()
+                val username = userInput.text.toString().trim()
+                val password = passInput.text.toString().trim()
+                if (accName.isEmpty() || username.isEmpty() || password.isEmpty()) {
+                    return@setPositiveButton
+                }
+                val accounts = loadAccounts()
+                accounts.put(accName, JSONObject().apply { put("username", username); put("password", password); put("cookie", "") })
+                saveAccounts(accounts)
+                forceAccountName = accName
+                forcedDealerUsername = username
+                forcedDealerPassword = password
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+                loginDone = false
+                loadInitialPage()
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun switchToAccount(name: String) {
+        val accounts = loadAccounts()
+        if (!accounts.has(name)) return
+        val acc = accounts.getJSONObject(name)
+        val username = acc.optString("username", "")
+        val password = acc.optString("password", "")
+        forceAccountName = name
+        if (username.isNotEmpty() && password.isNotEmpty()) {
+            forcedDealerUsername = username
+            forcedDealerPassword = password
+        }
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        loginDone = false
+        loadInitialPage()
     }
 }

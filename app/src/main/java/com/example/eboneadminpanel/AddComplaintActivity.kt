@@ -40,6 +40,7 @@ class AddComplaintActivity : AppCompatActivity() {
 
         loginButton.setOnClickListener {
             val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+            val resolvedZone = WebViewRouter.resolveZone(this, currentZone)
             CityPermissionManager.isCompanyEnabled(this, currentZone, "EBONE") { eboneEnabled ->
                 CityPermissionManager.isCompanyEnabled(this, currentZone, "WATEEN") { wateenEnabled ->
                     CityPermissionManager.isCompanyEnabled(this, currentZone, "ZONG") { zongEnabled ->
@@ -48,19 +49,19 @@ class AddComplaintActivity : AppCompatActivity() {
                             val ispMappings = mutableListOf<Pair<String, String>>()
                             if (eboneEnabled) {
                                 list.add("Ebone (ebill.pk)")
-                                ispMappings.add("EBONE" to "Okara")
+                                ispMappings.add("EBONE" to resolvedZone)
                             }
                             if (wateenEnabled) {
                                 list.add("Wateen (wateen.com)")
-                                ispMappings.add("WATEEN" to "Okara")
+                                ispMappings.add("WATEEN" to resolvedZone)
                             }
                             if (zongEnabled) {
                                 list.add("Zong (turbonet.zong.com.pk)")
-                                ispMappings.add("ZONG" to "Okara")
+                                ispMappings.add("ZONG" to resolvedZone)
                             }
                             if (jazzEnabled) {
                                 list.add("Jazz (biz.jazzftth.pk)")
-                                ispMappings.add("JAZZ" to "Okara")
+                                ispMappings.add("JAZZ" to resolvedZone)
                             }
 
                             if (list.isEmpty()) {
@@ -74,7 +75,7 @@ class AddComplaintActivity : AppCompatActivity() {
                                     val (selectedISP, selectedZone) = ispMappings[which]
                                     selectedCompany = selectedISP
 
-                                    val targetActivity = WebViewRouter.getTargetActivity(selectedISP, selectedZone)
+                                    val targetActivity = WebViewRouter.getTargetActivity(this, selectedISP, selectedZone)
                                     val intent = Intent(this, targetActivity).apply {
                                         putExtra("selected_isp", selectedISP)
                                         putExtra("target_zone", selectedZone)

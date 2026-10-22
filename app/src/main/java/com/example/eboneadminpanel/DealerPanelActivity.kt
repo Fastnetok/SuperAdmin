@@ -99,6 +99,8 @@ class DealerPanelActivity : AppCompatActivity() {
     private val amberBg = Color.parseColor("#FFF4E5")
     private val amberText = Color.parseColor("#B45309")
 
+    private lateinit var swipeRefreshLayout: androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -106,7 +108,14 @@ class DealerPanelActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("dealer_panel_prefs", MODE_PRIVATE)
         isBackgroundMode = prefs.getBoolean("is_background_mode", false)
         
-        setContentView(buildScreen())
+        val screenContent = buildScreen()
+        swipeRefreshLayout = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this).apply {
+            addView(screenContent)
+            setOnRefreshListener {
+                startAutoUpdate()
+            }
+        }
+        setContentView(swipeRefreshLayout)
         observeDealers()
         observePending()
         observeFranchiseBalances()
@@ -1189,7 +1198,40 @@ class DealerPanelActivity : AppCompatActivity() {
 
             isAutoUpdating = true
             observeFranchiseBalances()
-            if (isBackgroundMode) showStatusNotification("Auto Update Started", "تمام پینلز کا بیلنس بیک گراؤنڈ میں اپ ڈیٹ کیا جا رہا ہے ($canonicalZone)")
+
+            if (isBackgroundMode) {
+                showStatusNotification("Auto Update Started", "تمام پینلز کا بیلنس بیک گراؤنڈ میں اپ ڈیٹ کیا جا رہا ہے ($canonicalZone)")
+                Toast.makeText(this, "Starting parallel background update for $canonicalZone...", Toast.LENGTH_SHORT).show()
+                val totalPanels = autoUpdateQueue.size
+                var completedPanels = 0
+                val activeList = ArrayList(autoUpdateQueue)
+
+                activeList.forEach { (isp, zone) ->
+                    BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
+                        runOnUiThread {
+                            if (balance != null) {
+                                FranchiseBalanceManager.updateBalance(this, isp, balance, zone) {
+                                    FranchiseBalanceManager.showUpdateNotification(this, isp, balance, zone)
+                                }
+                            } else {
+                                showStatusNotification("$isp Update Failed", "بیلنس چیک کرنے میں دشواری پیش آئی")
+                            }
+                            completedPanels++
+                            if (completedPanels >= totalPanels) {
+                                isAutoUpdating = false
+                                if (::swipeRefreshLayout.isInitialized) {
+                                    swipeRefreshLayout.isRefreshing = false
+                                }
+                                showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
+                                Toast.makeText(this@DealerPanelActivity, "Auto Update completed!", Toast.LENGTH_LONG).show()
+                                observeFranchiseBalances()
+                            }
+                        }
+                    }
+                }
+                return@addOnSuccessListener
+            }
+
             Toast.makeText(this, "Starting Auto Update for $canonicalZone...", Toast.LENGTH_SHORT).show()
             processNextAutoUpdate()
         }
@@ -1199,6 +1241,9 @@ class DealerPanelActivity : AppCompatActivity() {
         if (autoUpdateQueue.isEmpty()) {
             isAutoUpdating = false
             observeFranchiseBalances()
+            if (::swipeRefreshLayout.isInitialized) {
+                swipeRefreshLayout.isRefreshing = false
+            }
             if (isBackgroundMode) showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
             Toast.makeText(this, "Auto Update completed!", Toast.LENGTH_LONG).show()
             return

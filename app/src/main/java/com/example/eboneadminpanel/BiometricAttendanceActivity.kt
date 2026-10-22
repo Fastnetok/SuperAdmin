@@ -22,6 +22,82 @@ class BiometricAttendanceActivity : AppCompatActivity() {
     private val db = FirebaseDatabase.getInstance()
     private var selectedDeviceId = ""
     private var selectedEmployee = ""
+    private var cachedGeoLat: Double? = null
+    private var cachedGeoLng: Double? = null
+    private var cachedGeoRadius: Double = 100.0
+    private var cachedComplaintRadius: Double = 500.0
+    private var cachedComplaintsSnapshot: DataSnapshot? = null
+
+    private fun loadGeofenceAndComplaintsForValidation(onReady: () -> Unit) {
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        val cleanCompId = compId.trim().uppercase()
+        val altCompId = if (cleanCompId.contains("-")) cleanCompId.replace("-", "") else {
+            if (cleanCompId.length > 3) cleanCompId.substring(0, 3) + "-" + cleanCompId.substring(3) else cleanCompId
+        }
+
+        db.getReference("attendanceGeofence").child(cleanCompId).get().addOnSuccessListener { geoSnap ->
+            var lat = geoSnap.child("lat").value?.toString()?.toDoubleOrNull()
+            var lng = geoSnap.child("lng").value?.toString()?.toDoubleOrNull()
+            var radius = geoSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+
+            if (lat != null && lng != null) {
+                cachedGeoLat = lat; cachedGeoLng = lng; cachedGeoRadius = radius
+                loadOfficeSettingsAndComplaints(cleanCompId, onReady)
+            } else {
+                db.getReference("attendanceGeofence").child(altCompId).get().addOnSuccessListener { altSnap ->
+                    lat = altSnap.child("lat").value?.toString()?.toDoubleOrNull()
+                    lng = altSnap.child("lng").value?.toString()?.toDoubleOrNull()
+                    radius = altSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+
+                    if (lat != null && lng != null) {
+                        cachedGeoLat = lat; cachedGeoLng = lng; cachedGeoRadius = radius
+                        loadOfficeSettingsAndComplaints(cleanCompId, onReady)
+                    } else {
+                        db.getReference("attendanceGeofence").get().addOnSuccessListener { rootSnap ->
+                            cachedGeoLat = rootSnap.child("lat").value?.toString()?.toDoubleOrNull()
+                            cachedGeoLng = rootSnap.child("lng").value?.toString()?.toDoubleOrNull()
+                            cachedGeoRadius = rootSnap.child("radius").value?.toString()?.toDoubleOrNull() ?: 100.0
+                            loadOfficeSettingsAndComplaints(cleanCompId, onReady)
+                        }.addOnFailureListener { loadOfficeSettingsAndComplaints(cleanCompId, onReady) }
+                    }
+                }.addOnFailureListener { loadOfficeSettingsAndComplaints(cleanCompId, onReady) }
+            }
+        }.addOnFailureListener { loadOfficeSettingsAndComplaints(cleanCompId, onReady) }
+    }
+
+    private fun loadOfficeSettingsAndComplaints(compId: String, onReady: () -> Unit) {
+        val cleanCompId = compId.trim().uppercase()
+        val altCompId = if (cleanCompId.contains("-")) cleanCompId.replace("-", "") else {
+            if (cleanCompId.length > 3) cleanCompId.substring(0, 3) + "-" + cleanCompId.substring(3) else cleanCompId
+        }
+
+        db.getReference("officeSettings").child(cleanCompId).get().addOnSuccessListener { settingsSnap ->
+            var radius = settingsSnap.child("complaintRadiusMeters").value?.toString()?.toDoubleOrNull()
+            if (radius != null) {
+                cachedComplaintRadius = radius
+                loadComplaintsSnapshot(onReady)
+            } else {
+                db.getReference("officeSettings").child(altCompId).get().addOnSuccessListener { altSettingsSnap ->
+                    radius = altSettingsSnap.child("complaintRadiusMeters").value?.toString()?.toDoubleOrNull() ?: 500.0
+                    cachedComplaintRadius = radius
+                    loadComplaintsSnapshot(onReady)
+                }.addOnFailureListener {
+                    cachedComplaintRadius = 500.0
+                    loadComplaintsSnapshot(onReady)
+                }
+            }
+        }.addOnFailureListener {
+            cachedComplaintRadius = 500.0
+            loadComplaintsSnapshot(onReady)
+        }
+    }
+
+    private fun loadComplaintsSnapshot(onReady: () -> Unit) {
+        db.getReference("complaints").get().addOnSuccessListener { compSnap ->
+            cachedComplaintsSnapshot = compSnap
+            onReady()
+        }.addOnFailureListener { onReady() }
+    }
     // Stores the most recently loaded "All Employees" attendance data so
     // that tapping Present/Absent/Late/Score while in All-Employees mode
     // can show a per-employee breakdown for the full month.
@@ -1140,7 +1216,7 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 })
                 val badgeText: String; val badgeColor: Int; val badgeBg: Int
                 when (status) {
-                    "OUTSIDE_GEOFENCE" -> { badgeText = "Outside Geofence (Rejected)"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
+                    "OUTSIDE_GEOFENCE" -> { badgeText = "Not at office or not at complain location"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
                     "LATE" -> { badgeText = "Late"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
                     "OVERTIME" -> { badgeText = "OT"; badgeColor = Color.parseColor("#1565C0"); badgeBg = Color.parseColor("#E3F2FD") }
                     else -> { badgeText = "On Time"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
@@ -1313,12 +1389,14 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         val monthKey = getMonthKey()
         tvMonth.text = getMonthLabel()
 
-        // Load overrides first, then attendance
-        db.getReference("adminOverrides").child(selectedDeviceId).get()
-            .addOnSuccessListener { overrideSnap ->
-                val overrides = overrideSnap.children.associateBy { it.key ?: "" }
-                loadAttendanceWithOverrides(monthKey, overrides)
-            }
+        loadGeofenceAndComplaintsForValidation {
+            // Load overrides first, then attendance
+            db.getReference("adminOverrides").child(selectedDeviceId).get()
+                .addOnSuccessListener { overrideSnap ->
+                    val overrides = overrideSnap.children.associateBy { it.key ?: "" }
+                    loadAttendanceWithOverrides(monthKey, overrides)
+                }
+        }
     }
 
     private fun loadAttendanceWithOverrides(
@@ -1856,31 +1934,89 @@ class BiometricAttendanceActivity : AppCompatActivity() {
 
     private fun readDayAttendance(daySnap: DataSnapshot): DayAttendance? {
         val sessSnap = daySnap.child("sessions")
+        var checkIn = ""
+        var checkOut = ""
+        var isLate = false
+        var hasOT = false
+        var ciTs = 0L
+        var coTs = 0L
+        var empLat = 0.0
+        var empLng = 0.0
+
         if (sessSnap.exists()) {
             val sessions = sessSnap.children.toList()
             val firstWithCheckIn = sessions.firstOrNull {
                 (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
             } ?: return null
-            val checkIn = firstWithCheckIn.child("checkInTime").value?.toString() ?: ""
+            checkIn = firstWithCheckIn.child("checkInTime").value?.toString() ?: ""
             if (checkIn.isEmpty()) return null
             val lastWithCheckOut = sessions.lastOrNull {
                 (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
             }
-            val checkOut = lastWithCheckOut?.child("checkOutTime")?.value?.toString() ?: ""
-            val isLate = sessions.any { it.child("status").value?.toString() == "LATE" }
-            val hasOT = sessions.any { it.child("status").value?.toString() == "OVERTIME" }
-            val ciTs = (firstWithCheckIn.child("checkInTimestamp").value as? Long) ?: 0L
-            val coTs = (lastWithCheckOut?.child("checkOutTimestamp")?.value as? Long) ?: 0L
-            return DayAttendance(checkIn, checkOut, isLate, ciTs, coTs, hasOT)
+            checkOut = lastWithCheckOut?.child("checkOutTime")?.value?.toString() ?: ""
+            isLate = sessions.any { it.child("status").value?.toString() == "LATE" }
+            hasOT = sessions.any { it.child("status").value?.toString() == "OVERTIME" }
+            ciTs = (firstWithCheckIn.child("checkInTimestamp").value as? Long) ?: 0L
+            coTs = (lastWithCheckOut?.child("checkOutTimestamp")?.value as? Long) ?: 0L
+            empLat = firstWithCheckIn.child("latitude").value?.toString()?.toDoubleOrNull()
+                ?: firstWithCheckIn.child("checkInLatitude").value?.toString()?.toDoubleOrNull()
+                ?: daySnap.child("latitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+            empLng = firstWithCheckIn.child("longitude").value?.toString()?.toDoubleOrNull()
+                ?: firstWithCheckIn.child("checkInLongitude").value?.toString()?.toDoubleOrNull()
+                ?: daySnap.child("longitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+        } else {
+            checkIn = daySnap.child("checkInTime").value?.toString() ?: ""
+            if (checkIn.isEmpty()) return null
+            checkOut = daySnap.child("checkOutTime").value?.toString() ?: ""
+            val status = daySnap.child("status").value?.toString() ?: ""
+            isLate = status == "LATE"
+            hasOT = status == "OVERTIME"
+            ciTs = (daySnap.child("checkInTimestamp").value as? Long) ?: 0L
+            coTs = (daySnap.child("checkOutTimestamp").value as? Long) ?: 0L
+            empLat = daySnap.child("latitude").value?.toString()?.toDoubleOrNull()
+                ?: daySnap.child("checkInLatitude").value?.toString()?.toDoubleOrNull() ?: 0.0
+            empLng = daySnap.child("longitude").value?.toString()?.toDoubleOrNull()
+                ?: daySnap.child("checkInLongitude").value?.toString()?.toDoubleOrNull() ?: 0.0
         }
-        // Legacy flat structure
-        val checkIn = daySnap.child("checkInTime").value?.toString() ?: ""
-        if (checkIn.isEmpty()) return null
-        val checkOut = daySnap.child("checkOutTime").value?.toString() ?: ""
-        val status = daySnap.child("status").value?.toString() ?: ""
-        val ciTs = (daySnap.child("checkInTimestamp").value as? Long) ?: 0L
-        val coTs = (daySnap.child("checkOutTimestamp").value as? Long) ?: 0L
-        return DayAttendance(checkIn, checkOut, status == "LATE", ciTs, coTs, status == "OVERTIME")
+
+        // Validate office geofence
+        var isWithinGeofence = true
+        if (cachedGeoLat != null && cachedGeoLng != null && empLat != 0.0 && empLng != 0.0) {
+            val dist = DistanceCalculator.distanceBetween(empLat, empLng, cachedGeoLat!!, cachedGeoLng!!)
+            if (dist > cachedGeoRadius) {
+                isWithinGeofence = false
+            }
+        }
+
+        // Validate complaint geofence if outside office geofence
+        var isWithinComplaintGeofence = false
+        if (!isWithinGeofence && empLat != 0.0 && empLng != 0.0 && cachedComplaintsSnapshot != null && cachedComplaintsSnapshot!!.exists()) {
+            for (cs in cachedComplaintsSnapshot!!.children) {
+                val assigned = cs.child("assignedTo").value?.toString() ?: ""
+                val normAssigned = assigned.trim().lowercase(Locale.getDefault())
+                val normEmpName = selectedEmployee.trim().lowercase(Locale.getDefault())
+                if (normAssigned.contains(normEmpName) || assigned.equals(selectedDeviceId, true)) {
+                    val compLat = cs.child("latitude").value?.toString()?.toDoubleOrNull()
+                        ?: cs.child("lat").value?.toString()?.toDoubleOrNull() ?: 0.0
+                    val compLng = cs.child("longitude").value?.toString()?.toDoubleOrNull()
+                        ?: cs.child("lng").value?.toString()?.toDoubleOrNull() ?: 0.0
+                    if (compLat != 0.0 && compLng != 0.0) {
+                        val distComp = DistanceCalculator.distanceBetween(empLat, empLng, compLat, compLng)
+                        if (distComp <= cachedComplaintRadius) {
+                            isWithinComplaintGeofence = true
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        // If outside both office geofence and complaint geofence, reject attendance entirely
+        if (!isWithinGeofence && !isWithinComplaintGeofence) {
+            return null
+        }
+
+        return DayAttendance(checkIn, checkOut, isLate, ciTs, coTs, hasOT)
     }
 
     private fun px(v: Int, dp: Float) = (v * dp).toInt()

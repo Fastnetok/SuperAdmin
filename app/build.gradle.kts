@@ -34,8 +34,8 @@ android {
         applicationId = "com.fastnet.superadmin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.0.12"
+        versionCode = 13
+        versionName = "1.0.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRenderer"
     }
 
@@ -110,6 +110,7 @@ dependencies {
 
     // Auto-Sync — Payment Sync Worker (background 15/30/45/60 min check)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
     implementation(
         platform(

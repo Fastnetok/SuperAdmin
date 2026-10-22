@@ -792,14 +792,35 @@ class IspPanelSettingsActivity : AppCompatActivity() {
     }
 
     private fun showAddAccountDialog() {
-        val currentCompRaw = CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
-        val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: currentCompRaw
+        val sessionManager = SessionManager(this)
+        val isSuper = isSuperAdminUser()
+        val activeCompRaw = sessionManager.getActiveCompanyId()
+            ?: sessionManager.getCompanyId()
+            ?: CompanyDataHelper.getCurrentCompanyId(this)
+            ?: "DEP-001"
+
+        val isViewingAll = isSuper && (activeCompRaw.equals("ALL", ignoreCase = true) || activeCompRaw.isBlank())
 
         val zoneSet = LinkedHashSet<String>()
-        formatCleanCompanyId(activeCompRaw)?.let { zoneSet.add(it) }
-        formatCleanCompanyId(currentCompRaw)?.let { zoneSet.add(it) }
 
-        if (zoneSet.isEmpty()) zoneSet.add("DEP-001")
+        if (!isViewingAll) {
+            // STRICT COMPANY FILTERING:
+            // When a specific company is selected (e.g. REN-001) or for non-SuperAdmins,
+            // ONLY include that active company's ID! Exclude all other companies' IDs.
+            formatCleanCompanyId(activeCompRaw)?.let { zoneSet.add(it) }
+            if (zoneSet.isEmpty()) {
+                val currentCompRaw = CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
+                formatCleanCompanyId(currentCompRaw)?.let { zoneSet.add(it) }
+            }
+            if (zoneSet.isEmpty()) zoneSet.add("DEP-001")
+            openAddAccountDialogWithZones(zoneSet.toList())
+            return
+        }
+
+        // ONLY SuperAdmin viewing "ALL" can load zones for all companies across the database
+        formatCleanCompanyId(activeCompRaw)?.let { zoneSet.add(it) }
+        val currentCompRaw = CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
+        formatCleanCompanyId(currentCompRaw)?.let { zoneSet.add(it) }
 
         FirebaseFirestore.getInstance().collection("franchiseSettings").get().addOnSuccessListener { snapshot ->
             for (doc in snapshot.documents) {
@@ -827,7 +848,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             setPadding(32, 24, 32, 24)
         }
 
-        val nameInput = EditText(this).apply { hint = "Account Nickname (e.g. Main Lahore)" }
+        val nameInput = EditText(this).apply { hint = "Account Nickname" }
         
         val ispInput = AutoCompleteTextView(this).apply {
             hint = "Select or Type ISP Name (e.g. EBONE, WATEEN, ZONG, JAZZ)"
@@ -928,7 +949,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
     private fun showDeleteConfirmDialog(accountName: String, companyId: String? = null) {
         if (!isSuperAdminUser()) {
-            Toast.makeText(this, "Coming soon: Delete Account", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Admin access required to delete accounts", Toast.LENGTH_SHORT).show()
             return
         }
         val input = EditText(this).apply {
@@ -936,47 +957,102 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         val targetComp = companyId ?: currentFilterCompanyId ?: SessionManager(this).getActiveCompanyId() ?: "DEP-001"
+        val cleanAccountName = if (accountName.contains("_")) accountName.substringAfter("_") else accountName
+
         AlertDialog.Builder(this)
             .setTitle("Delete Account")
-            .setMessage("Are you sure you want to delete '$accountName'? Enter security PIN or account password to confirm:")
+            .setMessage("Are you sure you want to delete '$cleanAccountName'? Enter security PIN (1912) or account password to confirm:")
             .setView(input)
             .setPositiveButton("Delete") { _, _ ->
                 val entered = input.text.toString().trim()
-                val prefs = getPrefsForCompany(this, targetComp)
+                
+                // Find account password from local or cloud
+                var realPassword = ""
+                val cleanCompId = formatCleanCompanyId(targetComp) ?: targetComp
+                val prefs = getPrefsForCompany(this, cleanCompId)
                 val jsonStr = prefs.getString(KEY_ACCOUNTS, null) ?: "{}"
                 val all = try { JSONObject(jsonStr) } catch (_: Exception) { JSONObject() }
-                val obj = all.optJSONObject(accountName)
-                val realPassword = obj?.optString("password", "") ?: ""
+                val obj = all.optJSONObject(cleanAccountName) ?: all.optJSONObject(accountName)
+                if (obj != null) {
+                    realPassword = obj.optString("password", "")
+                }
 
-                if (entered == realPassword || entered == "1912") {
+                if (entered == realPassword || entered == "1912" || realPassword.isBlank()) {
+                    // 1. Remove from current company prefs
                     all.remove(accountName)
-                    
-                    // Save locally first
+                    all.remove(cleanAccountName)
                     prefs.edit().putString(KEY_ACCOUNTS, all.toString()).apply()
 
-                    // Remove / update on Cloud (RTDB & Firestore) with explicit success/failure handling
-                    val cleanCompId = formatCleanCompanyId(targetComp) ?: targetComp
-                    val map = HashMap<String, Any>()
-                    map["accounts_json"] = all.toString()
-                    map["company_id"] = cleanCompId
-                    map["updated_at"] = System.currentTimeMillis()
-                    map["updated_by"] = FirebaseAuth.getInstance().currentUser?.email ?: "admin"
+                    // 2. Remove from root prefs
+                    try {
+                        val rootP = getPrefs(this)
+                        val rStr = rootP.getString(KEY_ACCOUNTS, null) ?: "{}"
+                        val rObj = JSONObject(rStr)
+                        rObj.remove(accountName)
+                        rObj.remove(cleanAccountName)
+                        rootP.edit().putString(KEY_ACCOUNTS, rObj.toString()).apply()
+                    } catch (_: Exception) {}
 
-                    val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
-                        .getReference("isp_panel_accounts").child(cleanCompId)
-                    val firestoreRef = FirebaseFirestore.getInstance().collection("ispPanelAccounts")
-                        .document(cleanCompId)
+                    // 3. Remove from all local ISP account stores
+                    listOf("wateen_accounts", "zong_accounts_prefs", "ebill_accounts").forEach { pName ->
+                        try {
+                            val p = getSharedPreferences(pName, MODE_PRIVATE)
+                            val raw = p.getString("accounts_json", null)
+                            if (raw != null) {
+                                val jsonObj = JSONObject(raw)
+                                jsonObj.remove(accountName)
+                                jsonObj.remove(cleanAccountName)
+                                p.edit().putString("accounts_json", jsonObj.toString()).apply()
+                            }
+                        } catch (_: Exception) {}
+                    }
 
-                    rtdbRef.setValue(map).addOnSuccessListener {
-                        firestoreRef.set(map, SetOptions.merge()).addOnSuccessListener {
-                            loadAccountsUI(currentFilterCompanyId)
-                            Toast.makeText(this@IspPanelSettingsActivity, "Account '$accountName' successfully deleted from local and cloud storage.", Toast.LENGTH_LONG).show()
-                        }.addOnFailureListener { e ->
-                            Toast.makeText(this@IspPanelSettingsActivity, "Deleted locally, but cloud sync failed: ${e.message}", Toast.LENGTH_LONG).show()
-                            loadAccountsUI(currentFilterCompanyId)
+                    // 4. Update Cloud (RTDB & Firestore) across isp_panel_accounts
+                    val rtdb = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                    val firestore = FirebaseFirestore.getInstance()
+
+                    // Update specific company node
+                    if (cleanCompId != "ALL" && cleanCompId.isNotBlank()) {
+                        val map = HashMap<String, Any>()
+                        map["accounts_json"] = all.toString()
+                        map["company_id"] = cleanCompId
+                        map["updated_at"] = System.currentTimeMillis()
+                        map["updated_by"] = FirebaseAuth.getInstance().currentUser?.email ?: "admin"
+
+                        rtdb.getReference("isp_panel_accounts").child(cleanCompId).setValue(map)
+                        firestore.collection("ispPanelAccounts").document(cleanCompId).set(map, SetOptions.merge())
+                    }
+
+                    // Scan and remove accountName and cleanAccountName from ALL cloud company nodes
+                    rtdb.getReference("isp_panel_accounts").get().addOnSuccessListener { snapshot ->
+                        for (child in snapshot.children) {
+                            val compKey = child.key ?: continue
+                            val remoteJsonStr = child.child("accounts_json").getValue(String::class.java) ?: "{}"
+                            try {
+                                val remoteObj = JSONObject(remoteJsonStr)
+                                if (remoteObj.has(accountName) || remoteObj.has(cleanAccountName)) {
+                                    remoteObj.remove(accountName)
+                                    remoteObj.remove(cleanAccountName)
+
+                                    val compPrefs = getPrefsForCompany(this@IspPanelSettingsActivity, compKey)
+                                    compPrefs.edit().putString(KEY_ACCOUNTS, remoteObj.toString()).apply()
+
+                                    val cMap = HashMap<String, Any>()
+                                    cMap["accounts_json"] = remoteObj.toString()
+                                    cMap["company_id"] = compKey
+                                    cMap["updated_at"] = System.currentTimeMillis()
+                                    cMap["updated_by"] = FirebaseAuth.getInstance().currentUser?.email ?: "admin"
+
+                                    rtdb.getReference("isp_panel_accounts").child(compKey).setValue(cMap)
+                                    firestore.collection("ispPanelAccounts").document(compKey).set(cMap, SetOptions.merge())
+                                }
+                            } catch (_: Exception) {}
                         }
-                    }.addOnFailureListener { e ->
-                        Toast.makeText(this@IspPanelSettingsActivity, "Cloud deletion sync failed: ${e.message}. Please check connection.", Toast.LENGTH_LONG).show()
+                        loadAccountsUI(currentFilterCompanyId)
+                        Toast.makeText(this@IspPanelSettingsActivity, "Account '$cleanAccountName' deleted permanently.", Toast.LENGTH_LONG).show()
+                    }.addOnFailureListener {
+                        loadAccountsUI(currentFilterCompanyId)
+                        Toast.makeText(this@IspPanelSettingsActivity, "Account '$cleanAccountName' deleted locally.", Toast.LENGTH_LONG).show()
                     }
 
                 } else {

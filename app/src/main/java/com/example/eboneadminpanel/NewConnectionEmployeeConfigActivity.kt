@@ -9,13 +9,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.*
 
 class NewConnectionEmployeeConfigActivity : AppCompatActivity() {
 
     private lateinit var recycler: RecyclerView
     private val employeeList = mutableListOf<EmployeeStatus>()
-    private val activeRefs = FirebaseDatabase.getInstance().getReference("officeSettings/new_connections/active_employees")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,18 +30,42 @@ class NewConnectionEmployeeConfigActivity : AppCompatActivity() {
     }
 
     private fun loadEmployees() {
+        val compId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        val companyActiveRef = FirebaseDatabase.getInstance().getReference("officeSettings").child(compId).child("new_connections/active_employees")
+        val rootActiveRef = FirebaseDatabase.getInstance().getReference("officeSettings/new_connections/active_employees")
+
         FirebaseDatabase.getInstance().getReference("employees").get().addOnSuccessListener { empSnapshot ->
-            activeRefs.get().addOnSuccessListener { activeSnapshot ->
-                employeeList.clear()
-                for (child in empSnapshot.children) {
-                    val name = child.child("employeeName").getValue(String::class.java) ?: ""
-                    if (name.isNotEmpty()) {
-                        val isActive = activeSnapshot.child(name).getValue(Boolean::class.java) ?: true
-                        employeeList.add(EmployeeStatus(name, isActive))
+            companyActiveRef.get().addOnSuccessListener { activeSnapshot ->
+                rootActiveRef.get().addOnSuccessListener { rootActiveSnapshot ->
+                    employeeList.clear()
+                    val uniqueEmpMap = mutableMapOf<String, String>()
+
+                    for (child in empSnapshot.children) {
+                        if (!CompanyDataHelper.belongsToCurrentCompany(this, child)) continue
+                        val rawName = child.child("employeeName").getValue(String::class.java)
+                            ?.takeIf { it.isNotBlank() }
+                            ?: child.child("name").getValue(String::class.java)
+                            ?: continue
+                        val normName = rawName.trim().lowercase()
+                        if (!uniqueEmpMap.containsKey(normName)) {
+                            uniqueEmpMap[normName] = rawName
+                        }
                     }
-                }
-                recycler.adapter = ConfigAdapter(employeeList) { name, status ->
-                    activeRefs.child(name).setValue(status)
+
+                    for ((_, displayName) in uniqueEmpMap) {
+                        val isActive = if (activeSnapshot.hasChild(displayName)) {
+                            activeSnapshot.child(displayName).getValue(Boolean::class.java) ?: true
+                        } else {
+                            rootActiveSnapshot.child(displayName).getValue(Boolean::class.java) ?: true
+                        }
+                        employeeList.add(EmployeeStatus(displayName, isActive))
+                    }
+
+                    employeeList.sortBy { it.name }
+                    recycler.adapter = ConfigAdapter(employeeList) { name, status ->
+                        companyActiveRef.child(name).setValue(status)
+                        rootActiveRef.child(name).setValue(status)
+                    }
                 }
             }
         }

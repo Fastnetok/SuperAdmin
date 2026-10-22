@@ -13,17 +13,30 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.content.SharedPreferences
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import org.json.JSONObject
 
 class JazzWebViewActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "JazzWebView"
+        private const val KEY_ACCOUNTS = "accounts_json"
+        private const val KEY_ACTIVE = "active_account"
     }
 
     private lateinit var webView: WebView
@@ -63,6 +76,10 @@ class JazzWebViewActivity : AppCompatActivity() {
             webView.loadUrl(jazzUrl)
         }
 
+        findViewById<Button>(R.id.accountSwitchButton)?.setOnClickListener {
+            showAccountListDialog()
+        }
+
         findViewById<Button>(R.id.btnAutoLogin).setOnClickListener {
             if (!isPageLoaded) {
                 Toast.makeText(this, "Please load the page first!", Toast.LENGTH_SHORT).show()
@@ -72,8 +89,19 @@ class JazzWebViewActivity : AppCompatActivity() {
         }
 
         configureWebView()
-        updateStatus("Loading Jazz Franchise Panel...")
-        webView.loadUrl(jazzUrl.trimEnd('/') + "/users/login")
+
+        val savedCookie = getIspSessionCookie("JAZZ", targetZone)
+        if (savedCookie.isNotEmpty()) {
+            savedCookie.split(";").forEach { part ->
+                if (part.isNotBlank()) CookieManager.getInstance().setCookie("https://biz.jazzftth.pk", part.trim())
+            }
+            CookieManager.getInstance().flush()
+            updateStatus("Restoring Jazz session cookie...")
+            webView.loadUrl("https://biz.jazzftth.pk/dashboard")
+        } else {
+            updateStatus("Loading Jazz Franchise Panel...")
+            webView.loadUrl(jazzUrl.trimEnd('/') + "/users/login")
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -105,6 +133,11 @@ class JazzWebViewActivity : AppCompatActivity() {
 
                 if (url == null) return
                 CookieManager.getInstance().flush()
+
+                val currentCookie = CookieManager.getInstance().getCookie("https://biz.jazzftth.pk")
+                if (!currentCookie.isNullOrEmpty()) {
+                    saveIspSessionCookie("JAZZ", targetZone, currentCookie)
+                }
 
                 if (url.contains("login") || url.contains("users/login")) {
                     if (!loginAttemptInProgress) {
@@ -264,6 +297,110 @@ class JazzWebViewActivity : AppCompatActivity() {
                 Log.e(TAG, "Could not read Jazz balance after $attempt attempts")
                 Toast.makeText(this, "Could not read Jazz balance", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun getIspSessionCookie(isp: String, zone: String): String {
+        return try {
+            val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            val prefs = EncryptedSharedPreferences.create(this, "isp_session_cookies", masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+            prefs.getString("${isp}_$zone", "") ?: ""
+        } catch (e: Exception) { "" }
+    }
+
+    private fun saveIspSessionCookie(isp: String, zone: String, cookie: String) {
+        try {
+            val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            val prefs = EncryptedSharedPreferences.create(this, "isp_session_cookies", masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+            prefs.edit().putString("${isp}_$zone", cookie).apply()
+        } catch (e: Exception) { }
+    }
+
+    private var activeAccountName: String = ""
+
+    private fun getJazzPrefsName(): String {
+        val cleanZone = targetZone.trim().lowercase().replace("-", "_")
+        return "jazz_accounts_$cleanZone"
+    }
+
+    private fun securePrefs(name: String): SharedPreferences {
+        val mk = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        return try {
+            EncryptedSharedPreferences.create(this, name, mk, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        } catch (e: Exception) {
+            getSharedPreferences(name, MODE_PRIVATE)
+        }
+    }
+
+    private fun showAccountListDialog() {
+        val prefsName = getJazzPrefsName()
+        val raw = securePrefs(prefsName).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+        val names = accounts.keys().asSequence().toList()
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_account_list, null)
+        val listView = dialogView.findViewById<ListView>(R.id.accountListView)
+        val addButton = dialogView.findViewById<Button>(R.id.addAccountButton)
+        val dialog = AlertDialog.Builder(this).setTitle("Jazz Accounts ($targetZone)").setView(dialogView).setNegativeButton("Close", null).create()
+        val adapter = object : ArrayAdapter<String>(this, R.layout.item_account_row, names) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_account_row, parent, false)
+                val name = names[position]
+                view.findViewById<TextView>(R.id.accountNameText).text = name
+                view.findViewById<TextView>(R.id.accountStatusText).text = if (name == activeAccountName) "Active" else ""
+                view.setOnClickListener { switchToAccount(name); dialog.dismiss() }
+                view.findViewById<Button>(R.id.deleteAccountButton).setOnClickListener {
+                    val updated = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+                    updated.remove(name)
+                    securePrefs(prefsName).edit().putString(KEY_ACCOUNTS, updated.toString()).apply()
+                    dialog.dismiss()
+                    showAccountListDialog()
+                }
+                return view
+            }
+        }
+        listView.adapter = adapter
+        addButton.setOnClickListener { dialog.dismiss(); showAddAccountDialog() }
+        dialog.show()
+    }
+
+    private fun showAddAccountDialog() {
+        val prefsName = getJazzPrefsName()
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 20, 40, 20) }
+        val ni = EditText(this).apply { hint = "Account name (e.g. Akmal)" }
+        val ui = EditText(this).apply { hint = "Jazz username" }
+        val pi = EditText(this).apply { hint = "Jazz password"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        layout.addView(ni); layout.addView(ui); layout.addView(pi)
+        AlertDialog.Builder(this).setTitle("Add new account").setView(layout).setPositiveButton("Save and login") { _, _ ->
+            val an = ni.text.toString().trim()
+            val u = ui.text.toString().trim()
+            val p = pi.text.toString().trim()
+            if (an.isEmpty() || u.isEmpty() || p.isEmpty()) return@setPositiveButton
+            val raw = securePrefs(prefsName).getString(KEY_ACCOUNTS, "") ?: ""
+            val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+            accounts.put(an, JSONObject().apply { put("username", u); put("password", p); put("cookie", "") })
+            securePrefs(prefsName).edit().putString(KEY_ACCOUNTS, accounts.toString()).apply()
+            activeAccountName = an
+            securePrefs(prefsName).edit().putString(KEY_ACTIVE, an).apply()
+            etUsername.setText(u)
+            etPassword.setText(p)
+            parseAndExecuteAutoLogin()
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun switchToAccount(name: String) {
+        val prefsName = getJazzPrefsName()
+        val raw = securePrefs(prefsName).getString(KEY_ACCOUNTS, "") ?: ""
+        val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
+        if (!accounts.has(name)) return
+        val acc = accounts.getJSONObject(name)
+        val u = acc.optString("username", "")
+        val p = acc.optString("password", "")
+        activeAccountName = name
+        securePrefs(prefsName).edit().putString(KEY_ACTIVE, name).apply()
+        if (u.isNotEmpty() && p.isNotEmpty()) {
+            etUsername.setText(u)
+            etPassword.setText(p)
+            parseAndExecuteAutoLogin()
         }
     }
 }
