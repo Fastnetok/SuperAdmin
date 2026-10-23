@@ -13,9 +13,7 @@ android {
     signingConfigs {
 
         create("release") {
-            val localKey = file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
-            val appKey = file("keystore.jks")
-            storeFile = if (localKey.exists()) localKey else appKey
+            storeFile = file("keystore.jks")
             storePassword = "superadmin_store_pass"
             keyAlias = "superadmin_key"
             keyPassword = "superadmin_store_pass"
@@ -33,21 +31,11 @@ android {
 
     buildTypes {
         debug {
-            val relConfig = signingConfigs.findByName("release")
-            if (relConfig?.storeFile?.exists() == true) {
-                signingConfig = relConfig
-            } else {
-                signingConfig = signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
 
         release {
-            val relConfig = signingConfigs.findByName("release")
-            if (relConfig?.storeFile?.exists() == true) {
-                signingConfig = relConfig
-            } else {
-                signingConfig = signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
 
             isMinifyEnabled = false
 
