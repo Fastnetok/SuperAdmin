@@ -1,3 +1,3 @@
-# Implementation Plan - Ebone Session Cookie Restore Fix
+# Implementation Plan - Permanent Signing Mismatch Fix & Version Bump (v1.0.14)
 
-Restore Ebone session cookies directly in loadInitialPage without requiring IspPanelSettingsActivity username check in EboneWebViewActivity.kt.
+Fix signingConfigs in app/build.gradle.kts to use persistent keystore and bump version to 1.0.14.

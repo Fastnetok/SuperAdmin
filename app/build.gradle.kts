@@ -13,19 +13,11 @@ android {
     signingConfigs {
 
         create("release") {
-
-            val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
-
-            storeFile = if (isGitHub) {
-                file("keystore.jks")
-            } else {
-                file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
-            }
-
+            val localKey = file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
+            val appKey = file("keystore.jks")
+            storeFile = if (localKey.exists()) localKey else appKey
             storePassword = "superadmin_store_pass"
-
             keyAlias = "superadmin_key"
-
             keyPassword = "superadmin_store_pass"
         }
     }
@@ -34,24 +26,27 @@ android {
         applicationId = "com.fastnet.superadmin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.0.13"
+        versionCode = 14
+        versionName = "1.0.14"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRenderer"
     }
 
     buildTypes {
-
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            val relConfig = signingConfigs.findByName("release")
+            if (relConfig?.storeFile?.exists() == true) {
+                signingConfig = relConfig
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
 
         release {
-            val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
-            val releaseKeyFile = file("D:/AndroidKeys/SuperAdminReleaseKey.jks")
-            signingConfig = if (isGitHub || !releaseKeyFile.exists()) {
-                signingConfigs.getByName("debug")
+            val relConfig = signingConfigs.findByName("release")
+            if (relConfig?.storeFile?.exists() == true) {
+                signingConfig = relConfig
             } else {
-                signingConfigs.getByName("release")
+                signingConfig = signingConfigs.getByName("debug")
             }
 
             isMinifyEnabled = false

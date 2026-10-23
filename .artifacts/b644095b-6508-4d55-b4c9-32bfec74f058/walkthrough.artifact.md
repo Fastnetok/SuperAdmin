@@ -1,16 +1,14 @@
-# Walkthrough - Ebone Session Cookie Restore Fix
+# Walkthrough - Permanent Signing Mismatch Fix & Version Bump (v1.0.14)
 
-Successfully resolved the issue where Ebone attempted a full re-login every time when opened from New Complaint (`AddComplaintActivity`), by enabling direct session cookie restoration and direct navigation to `https://partner.ebill.pk/clients`.
+Successfully resolved the signing mismatch issue on GitHub Actions and bumped the version code to `14` (`versionName = "1.0.14"`).
 
-## Root Cause Identified
-- `EboneWebViewActivity.kt` previously guarded session cookie restoration behind `if (!ispUsername.isNullOrEmpty())`. When Ebone accounts were stored in zone-scoped preferences (`ebill_accounts_$cleanZone`), `ispUsername` returned null, skipping cookie restoration entirely and forcing a full re-login every time.
-
-## Changes Implemented & Verification
-
-### [EboneWebViewActivity.kt](file:///C:/Users/Dell/AndroidStudioProjects/SuperAdminSuite/SuperAdmin/app/src/main/java/com/example/eboneadminpanel/EboneWebViewActivity.kt)
-- Removed the blocking `ispUsername` condition in `loadInitialPage()` so valid session cookies in `ISP_SESSION_PREFS` (`"EBONE_$targetZone"`) and zone-scoped accounts (`ebill_accounts_$cleanZone`) are restored directly, navigating straight to `https://partner.ebill.pk/clients` with zero latency.
+## Root Cause Identified & Fixed
+- Previously, `app/build.gradle.kts` forced GitHub Actions builds to use `signingConfigs.getByName("debug")`, generating a random temporary debug keystore on every GitHub release. This caused every GitHub Release APK to have a different signature, resulting in the `"App not installed"` error when updating.
+- Updated `app/build.gradle.kts` so both local and GitHub Actions builds use the persistent release keystore (`app/keystore.jks` / `SuperAdminReleaseKey.jks`).
+- Bumped version to `versionCode = 14`, `versionName = "1.0.14"`.
 
 ## Verification Results
 
 ### Automated Build Check
 - Executed `gradle_build("app:assembleDebug")` successfully with **0 errors**.
+- Executed `gradle_build("app:assembleRelease")` successfully with **0 errors**.
