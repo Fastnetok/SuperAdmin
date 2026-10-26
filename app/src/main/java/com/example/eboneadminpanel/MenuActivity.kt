@@ -123,7 +123,7 @@ class MenuActivity : BaseAdminActivity() {
         }
 
         findViewById<TextView>(R.id.menuDealerPanel).setOnClickListener {
-            startActivity(Intent(this, DealerDashboardActivity::class.java))
+            startActivity(Intent(this, DealerPanelActivity::class.java))
         }
 
         findViewById<TextView>(R.id.menuAutoComplaintMonitor).setOnClickListener {

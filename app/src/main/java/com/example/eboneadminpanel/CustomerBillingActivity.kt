@@ -12,11 +12,15 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import androidx.core.widget.doAfterTextChanged
 import com.example.superadmin.CityPermissionManager
 import com.example.superadmin.core.CompanyDataHelper
 import com.example.superadmin.databinding.ActivityCustomerBillingBinding
 import com.example.superadmin.databinding.ItemNetworkRowBinding
 import com.example.superadmin.databinding.ItemTransactionRowBinding
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -72,7 +76,9 @@ class CustomerBillingActivity : AppCompatActivity() {
         binding.btnMenu.setOnClickListener {
             startActivity(Intent(this, PaymentMethodSettingsActivity::class.java))
         }
-        binding.btnViewAllTransactions.setOnClickListener { }
+        binding.btnViewAllTransactions.setOnClickListener { showQuickPackageActivationDialog() }
+        binding.tvPackagesToday.setOnClickListener { showQuickPackageActivationDialog() }
+        (binding.tvPackagesToday.parent as? View)?.setOnClickListener { showQuickPackageActivationDialog() }
 
         // Unpaid Today = currently active Relief customers / currently
         // disabled (suspended) relief customers — see renderUnpaidTodayCard().
@@ -697,6 +703,245 @@ class CustomerBillingActivity : AppCompatActivity() {
                     binding.recentTransactionsContainer.addView(row.root)
                 }
             }
+    }
+
+    private var isActivationInProgress = false
+    private val REQUEST_PACKAGE_ACTIVATION = 8001
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun extractCleanCustomerId(label: String): String {
+        return label
+            .substringBefore(" · ")
+            .substringBefore(" (")
+            .replace(".", "")
+            .trim()
+    }
+
+    private fun showQuickPackageActivationDialog() {
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+
+        // 1. Company Spinner
+        val spinnerCompany = Spinner(this)
+        val companyAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, companies)
+        spinnerCompany.adapter = companyAdapter
+
+        // 2. AutoComplete Search Box
+        val search = AutoCompleteTextView(this).apply {
+            hint = "Type Customer ID or Name..."
+            threshold = 1
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), Color.parseColor("#E4E7EC"))
+            }
+        }
+
+        val tvInfo = TextView(this).apply {
+            text = "Select a customer to view details"
+            textSize = 12f
+            setTextColor(Color.parseColor("#667085"))
+            setPadding(0, dp(8), 0, dp(12))
+        }
+
+        val btnSaveNewUser = Button(this).apply {
+            text = "Save New User to Database"
+            textSize = 12f
+            setBackgroundColor(Color.parseColor("#10B981"))
+            setTextColor(Color.WHITE)
+            visibility = View.GONE
+        }
+
+        layout.addView(TextView(this).apply { text = "Select ISP Company:"; textSize = 12f; setTypeface(null, Typeface.BOLD) })
+        layout.addView(spinnerCompany)
+        layout.addView(TextView(this).apply { text = "Search Customer ID / Name:"; textSize = 12f; setTypeface(null, Typeface.BOLD); setPadding(0, dp(12), 0, 0) })
+        layout.addView(search)
+        layout.addView(tvInfo)
+        layout.addView(btnSaveNewUser)
+
+        val customerList = mutableListOf<DocumentSnapshot>()
+        var selectedDoc: DocumentSnapshot? = null
+
+        fun rebuildAdapter() {
+            val rawLabels = mutableListOf<String>()
+            val seen = HashSet<String>()
+            customerList.forEach { doc ->
+                val id = doc.getString("customerId") ?: doc.id
+                val name = doc.getString("name") ?: doc.getString("customerName") ?: ""
+                val pkg = doc.getString("packageId") ?: ""
+                if (id.isNotBlank() && seen.add(id.uppercase(Locale.getDefault()))) {
+                    val label = if (name.isNotBlank() && !name.equals(id, true)) "$id ($name) · $pkg" else "$id · $pkg"
+                    rawLabels.add(label)
+                }
+            }
+
+            val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, rawLabels) {
+                private val allItems = ArrayList(rawLabels)
+                override fun getFilter(): Filter {
+                    return object : Filter() {
+                        override fun performFiltering(constraint: CharSequence?): FilterResults {
+                            val res = FilterResults()
+                            if (constraint.isNullOrBlank()) {
+                                res.values = allItems; res.count = allItems.size
+                            } else {
+                                val q = constraint.toString().trim().lowercase(Locale.getDefault())
+                                val filtered = allItems.filter { it.lowercase(Locale.getDefault()).contains(q) }
+                                res.values = filtered; res.count = filtered.size
+                            }
+                            return res
+                        }
+                        @Suppress("UNCHECKED_CAST")
+                        override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
+                            clear()
+                            if (results != null && results.count > 0) {
+                                addAll(results.values as List<String>)
+                                notifyDataSetChanged()
+                            } else {
+                                notifyDataSetInvalidated()
+                            }
+                        }
+                    }
+                }
+            }
+
+            search.setAdapter(adapter)
+            search.threshold = 1
+            search.dropDownHeight = dp(220)
+        }
+
+        fun loadCustomers(company: String) {
+            db.collection("customers").get().addOnSuccessListener { snapshot ->
+                customerList.clear()
+                snapshot.documents.forEach { doc ->
+                    if (CompanyDataHelper.belongsToCurrentCompany(this@CustomerBillingActivity, doc)) {
+                        customerList.add(doc)
+                    }
+                }
+                rebuildAdapter()
+            }
+        }
+
+        spinnerCompany.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p0: AdapterView<*>?, p1: View?, pos: Int, p3: Long) {
+                if (pos in companies.indices) loadCustomers(companies[pos])
+            }
+            override fun onNothingSelected(p0: AdapterView<*>?) {}
+        }
+
+        search.setOnItemClickListener { parent, _, position, _ ->
+            val label = parent.getItemAtPosition(position)?.toString().orEmpty()
+            val cleanId = extractCleanCustomerId(label)
+            search.setText(cleanId, false)
+            if (cleanId.isNotEmpty()) search.setSelection(cleanId.length)
+
+            selectedDoc = customerList.firstOrNull { doc ->
+                val id = doc.getString("customerId") ?: doc.id
+                id.equals(cleanId, true) || extractCleanCustomerId(id).equals(cleanId, true)
+            }
+            if (selectedDoc != null) {
+                val pkg = selectedDoc?.getString("packageId") ?: "—"
+                val price = (selectedDoc?.get("packagePrice") as? Number)?.toDouble() ?: 0.0
+                tvInfo.text = "Selected: $cleanId\nPackage: $pkg (Rs. ${"%.0f".format(price)})"
+                btnSaveNewUser.visibility = View.GONE
+            }
+        }
+
+        search.doAfterTextChanged { editable ->
+            val typed = extractCleanCustomerId(editable?.toString() ?: "")
+            if (typed.isNotBlank()) {
+                val matches = customerList.any { doc ->
+                    val id = doc.getString("customerId") ?: doc.id
+                    id.equals(typed, true) || extractCleanCustomerId(id).equals(typed, true)
+                }
+                btnSaveNewUser.visibility = if (matches) View.GONE else View.VISIBLE
+            } else {
+                btnSaveNewUser.visibility = View.GONE
+            }
+        }
+
+        btnSaveNewUser.setOnClickListener {
+            val typedId = extractCleanCustomerId(search.text.toString())
+            if (typedId.isBlank()) return@setOnClickListener
+            val company = spinnerCompany.selectedItem?.toString() ?: "EBONE"
+
+            val data = mapOf(
+                "customerId" to typedId,
+                "name" to typedId,
+                "ispProvider" to company,
+                "activationStatus" to "ACTIVE",
+                "companyId" to currentComp,
+                "company" to currentComp,
+                "zone" to canonicalZone,
+                "createdAt" to System.currentTimeMillis()
+            )
+
+            db.collection("customers").document(typedId).set(data).addOnSuccessListener {
+                try {
+                    FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                        .getReference("customers").child(typedId).setValue(data)
+                } catch (_: Exception) {}
+                Toast.makeText(this, "Customer '$typedId' saved in database!", Toast.LENGTH_SHORT).show()
+                btnSaveNewUser.visibility = View.GONE
+                loadCustomers(company)
+            }
+        }
+
+        if (companies.isNotEmpty()) loadCustomers(companies.first())
+
+        AlertDialog.Builder(this)
+            .setTitle("⚡ Quick Package Activation ($canonicalZone)")
+            .setView(ScrollView(this).apply { addView(layout) })
+            .setPositiveButton("⚡ Activate Package Now") { _, _ ->
+                val typedId = extractCleanCustomerId(search.text.toString())
+                if (typedId.isBlank()) {
+                    Toast.makeText(this, "Please select or type a Customer ID first.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                if (isActivationInProgress) {
+                    Toast.makeText(this, "Package activation already in progress...", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                isActivationInProgress = true
+
+                val company = spinnerCompany.selectedItem?.toString() ?: "EBONE"
+                val targetActivity = WebViewRouter.getTargetActivity(company, currentComp)
+                val linkedAccount = IspPanelSettingsActivity.getActiveActivationAccount(this, company, currentComp)
+
+                val intent = Intent(this, targetActivity).apply {
+                    putExtra("selected_isp", company)
+                    putExtra("auto_activate_customer_id", typedId)
+                    putExtra("manual_action", "RELIEF_VIEW")
+                    putExtra("target_zone", currentComp)
+                    if (!linkedAccount.isNullOrBlank()) {
+                        putExtra("use_dealer_account", true)
+                        putExtra("dealer_account_name", linkedAccount.toString())
+                        putExtra("force_account_name", linkedAccount.toString())
+                    }
+                }
+
+                Toast.makeText(this, "Launching $company package activation for $typedId...", Toast.LENGTH_SHORT).show()
+                startActivityForResult(intent, REQUEST_PACKAGE_ACTIVATION)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        isActivationInProgress = false
+        if (requestCode == REQUEST_PACKAGE_ACTIVATION) {
+            if (resultCode == RESULT_OK) {
+                Toast.makeText(this, "Package Activated Successfully!", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun showClearDialog(

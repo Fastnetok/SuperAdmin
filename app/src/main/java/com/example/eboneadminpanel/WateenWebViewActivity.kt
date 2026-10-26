@@ -28,6 +28,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import org.json.JSONObject
@@ -109,10 +110,6 @@ class WateenWebViewActivity : AppCompatActivity() {
 
         Log.d(TAG, "onCreate: manualAction=$manualAction, dealerEboneId=$dealerEboneId, topupAmount=$topupAmount")
 
-        if (manualAction == "DEALER_TOPUP" && forceAccountName.isNullOrBlank()) {
-            forceAccountName = dealerDisplayName?.trim()?.takeIf { it.isNotBlank() }
-        }
-
         wateenManualStepMode = manualAction == "DEALER_TOPUP" && intent.getBooleanExtra("wateen_manual_step_mode", false)
 
         webView = findViewById(R.id.loginWebView)
@@ -122,7 +119,16 @@ class WateenWebViewActivity : AppCompatActivity() {
             switchButton.text = "Next Step ▶"
             switchButton.setOnClickListener { advanceWateenManualStep() }
         } else {
-            switchButton.setOnClickListener { showAccountListDialog() }
+            switchButton.text = "🚪 Logout / Switch"
+            switchButton.setOnClickListener {
+                securePrefs(ISP_SESSION_PREFS).edit().remove("WATEEN_$targetZone").remove("WATEEN_${targetZone}_user").apply()
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+                loginDone = false
+                loginAttemptInProgress = false
+                webView.loadUrl("https://panel.wateen.com/auth.html")
+                Toast.makeText(this@WateenWebViewActivity, "Session cleared. Logging in afresh...", Toast.LENGTH_SHORT).show()
+            }
         }
 
         configureWebView()
@@ -177,6 +183,22 @@ class WateenWebViewActivity : AppCompatActivity() {
         }
     }
 
+    private fun showInvalidCredentialsPopup(isp: String, zone: String) {
+        AlertDialog.Builder(this)
+            .setTitle("⚠️ $isp Login Failed ($zone)")
+            .setMessage("Invalid username or password detected. Please verify your login credentials in ISP Panel Settings.")
+            .setPositiveButton("Open ISP Settings") { _, _ ->
+                startActivity(Intent(this, IspPanelSettingsActivity::class.java))
+                finish()
+            }
+            .setNegativeButton("Close") { dialog, _ ->
+                dialog.dismiss()
+                finish()
+            }
+            .setCancelable(false)
+            .show()
+    }
+
     private fun handlePageLoaded(url: String) {
         when {
             url.contains("auth.html") -> {
@@ -184,10 +206,40 @@ class WateenWebViewActivity : AppCompatActivity() {
                 loginDone = false
                 loginAttemptInProgress = false
                 actionStartedAfterLogin = false
-                tryAutoLogin()
+                webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText : ''; })()") { bodyText ->
+                    if (bodyText != null && (bodyText.contains("Invalid username or password", ignoreCase = true) || bodyText.contains("Incorrect", ignoreCase = true) || bodyText.contains("login_error", ignoreCase = true))) {
+                        showInvalidCredentialsPopup("WATEEN", targetZone)
+                    } else {
+                        tryAutoLogin()
+                    }
+                }
             }
             url.contains("panel.wateen.com") && url.contains("/user/user/view/") && autoActivateCustomerId != null -> {
-                onWateenProfileOpened()
+                if (manualAction == "SUSPEND") {
+                    onWateenProfileOpened()
+                } else {
+                    IspPackageActivationHandler.handleWateenPackageActivation(
+                        this,
+                        webView,
+                        url,
+                        autoActivateCustomerId,
+                        onSuccess = { newExpiry ->
+                            setResult(RESULT_OK, Intent().apply {
+                                putExtra("activation_success", true)
+                                putExtra("manual_action_success", true)
+                                putExtra("new_expiry_date", newExpiry)
+                            })
+                            finish()
+                        },
+                        onFailure = { reason ->
+                            setResult(RESULT_OK, Intent().apply {
+                                putExtra("activation_success", false)
+                                putExtra("error_reason", reason)
+                            })
+                            finish()
+                        }
+                    )
+                }
             }
             url.contains("panel.wateen.com") && url.contains("/user/user/view/") -> {
                 fetchWateenCustomerDetails()
@@ -263,44 +315,33 @@ class WateenWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
-        // Purge any stale cookies from other ISP / Zone sessions
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
+        val reqModule = IspAccountResolver.resolveModule(manualAction, autoActivateCustomerId)
+        val ispUsername = IspAccountResolver.getActiveUsername(this, "WATEEN", targetZone, reqModule)
 
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "WATEEN", targetZone)
+        val cookieUser = securePrefs(ISP_SESSION_PREFS).getString("WATEEN_${targetZone}_user", "") ?: ""
+
+        if (manualAction == "DEALER_TOPUP" || (!ispUsername.isNullOrEmpty() && cookieUser.isNotEmpty() && !cookieUser.equals(ispUsername, true))) {
+            securePrefs(ISP_SESSION_PREFS).edit().remove("WATEEN_$targetZone").remove("WATEEN_${targetZone}_user").apply()
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            webView.loadUrl("https://panel.wateen.com/auth.html")
+            return
+        }
+
         if (!ispUsername.isNullOrEmpty()) {
             val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("WATEEN_$targetZone", "") ?: ""
-            if (savedCookie.isNotEmpty()) {
-                Log.d(TAG, "Loading with saved ISP session cookie for Wateen / $targetZone")
+            if (savedCookie.isNotEmpty() && (cookieUser.isEmpty() || cookieUser.equals(ispUsername, true))) {
+                Log.d(TAG, "Loading with saved ISP session cookie for $ispUsername / $targetZone")
                 savedCookie.split(";").forEach {
                     if (it.isNotBlank()) CookieManager.getInstance().setCookie("https://panel.wateen.com", it.trim())
                 }
                 CookieManager.getInstance().flush()
                 webView.loadUrl("https://panel.wateen.com/user/user/all")
-            } else {
-                webView.loadUrl("https://panel.wateen.com/auth.html")
+                return
             }
-            return
         }
 
-        val rawAccounts = securePrefs(getWateenPrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
-        val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-        val active = securePrefs(getWateenPrefsName()).getString(KEY_ACTIVE, "") ?: ""
-        if (active.isNotEmpty() && accounts.has(active)) {
-            activeAccountName = active
-            val acc = accounts.getJSONObject(active)
-            val cookie = acc.optString("cookie", "")
-            if (cookie.isNotEmpty()) {
-                Log.d(TAG, "Loading with saved account cookie: $active")
-                CookieManager.getInstance().setCookie("https://panel.wateen.com", cookie)
-                CookieManager.getInstance().flush()
-                webView.loadUrl("https://panel.wateen.com/user/user/all")
-            } else {
-                webView.loadUrl("https://panel.wateen.com/auth.html")
-            }
-        } else {
-            webView.loadUrl("https://panel.wateen.com/auth.html")
-        }
+        webView.loadUrl("https://panel.wateen.com/auth.html")
     }
 
     private fun tryAutoLogin() {
@@ -319,10 +360,11 @@ class WateenWebViewActivity : AppCompatActivity() {
             }
         }
 
-        val iu = IspPanelSettingsActivity.getSavedUsername(this, "WATEEN", targetZone)
-        val ip = IspPanelSettingsActivity.getSavedPassword(this, "WATEEN", targetZone)
+        val reqModule = IspAccountResolver.resolveModule(manualAction, autoActivateCustomerId)
+        val iu = IspAccountResolver.getActiveUsername(this, "WATEEN", targetZone, reqModule)
+        val ip = IspAccountResolver.getActivePassword(this, "WATEEN", targetZone, reqModule)
         if (!iu.isNullOrEmpty() && !ip.isNullOrEmpty()) {
-            Log.d(TAG, "Logging in with saved ISP credentials")
+            Log.d(TAG, "Logging in with saved ISP credentials ($iu)")
             doLoginWith(iu, ip)
             return
         }
@@ -347,6 +389,9 @@ class WateenWebViewActivity : AppCompatActivity() {
 
     private fun doLoginWith(username: String, password: String, attempt: Int = 1) {
         Log.d(TAG, "doLoginWith attempt $attempt for $username")
+        runOnUiThread {
+            Toast.makeText(this, "Logging in with: $username", Toast.LENGTH_SHORT).show()
+        }
         webView.postDelayed({
             val script = """
                 (function(){
@@ -983,6 +1028,9 @@ class WateenWebViewActivity : AppCompatActivity() {
             
             Log.d(TAG, "Top-up Result Captured. Balance After: $balance")
             
+            val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: targetZone ?: "OKARA"
+            val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
             val logEntry = mapOf(
                 "dealerId" to (dealerInternalId ?: ""),
                 "dealerName" to (dealerDisplayName ?: ""),
@@ -990,11 +1038,26 @@ class WateenWebViewActivity : AppCompatActivity() {
                 "ispDealerId" to (dealerEboneId ?: ""),
                 "amount" to amount,
                 "submittedAt" to System.currentTimeMillis(),
+                "createdAt" to System.currentTimeMillis(),
+                "companyId" to currentComp,
+                "company" to currentComp,
+                "zone" to canonicalZone,
                 "resultText" to clean.take(500),
                 "dealerBalanceAfter" to balance,
                 "sourceTransactionId" to (sourceTransactionId ?: "")
             )
             db.collection("dealerPayments").add(logEntry)
+
+            if (!dealerInternalId.isNullOrBlank()) {
+                db.collection("dealers").document(dealerInternalId!!)
+                    .update("wateenBalance", com.google.firebase.firestore.FieldValue.increment(amount))
+
+                try {
+                    com.google.firebase.database.FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                        .getReference("dealers").child(dealerInternalId!!).child("wateenBalance")
+                        .setValue(com.google.firebase.database.ServerValue.increment(amount))
+                } catch (_: Exception) {}
+            }
 
             val smsId = sourceTransactionId?.takeIf { it.isNotBlank() }
             if (smsId != null) {

@@ -92,7 +92,7 @@ class EboneAdminApp : Application() {
                     putExtra("target_zone", "Okara")
                     if (isp == "EBONE") {
                         putExtra("use_dealer_account", true)
-                        putExtra("dealer_account_name", "Akmal")
+                        putExtra("dealer_account_name", "FastNet")
                     }
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }

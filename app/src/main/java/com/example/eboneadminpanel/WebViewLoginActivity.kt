@@ -347,10 +347,11 @@ class WebViewLoginActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(
                     this,
-                    "Dealer account \"$forceAccountName\" not found for $selectedIsp/$targetZone. Add it first via ISP Panel Settings → Add Dealer.",
+                    "Dealer account \"$forceAccountName\" is paused or not found for $selectedIsp/$targetZone.",
                     Toast.LENGTH_LONG
                 ).show()
-                loadInitialPage()
+                // DO NOT fallback to Franchise! Just stop at login page.
+                webView.loadUrl(loginUrlFor(selectedIsp))
             }
         } else {
             loadInitialPage()
@@ -423,22 +424,8 @@ class WebViewLoginActivity : AppCompatActivity() {
             return
         }
 
-        val accounts = loadAccounts()
-        val active = securePrefs(getPrefsName()).getString(KEY_ACTIVE, "") ?: ""
-        if (active.isNotEmpty() && accounts.has(active)) {
-            activeAccountName = active
-            val acc = accounts.getJSONObject(active)
-            val cookie = acc.optString("cookie", "")
-            if (cookie.isNotEmpty()) {
-                CookieManager.getInstance().setCookie(domainFor(selectedIsp), cookie)
-                CookieManager.getInstance().flush()
-                webView.loadUrl(clientsUrlFor(selectedIsp))
-            } else {
-                webView.loadUrl(loginUrlFor(selectedIsp))
-            }
-        } else {
-            webView.loadUrl(loginUrlFor(selectedIsp))
-        }
+        // Just load the login page and STOP. No finish(), no auto-login.
+        webView.loadUrl(loginUrlFor(selectedIsp))
     }
 
     private fun loadAccounts(): JSONObject {
@@ -846,15 +833,15 @@ class WebViewLoginActivity : AppCompatActivity() {
         if (loginAttemptInProgress) return
         loginAttemptInProgress = true
 
-        // FIX: if a specific dealer account was forced (e.g. "Akmal" via
-        // dealer_account_name), its credentials — already looked up
-        // correctly from IspPanelSettingsActivity in onCreate — MUST be
-        // used, and Franchise credentials must never be checked at all.
-        // Previously this checked IspPanelSettingsActivity.getSavedUsername
-        // first, which is Franchise-priority by design and silently
-        // overrode the forced dealer selection.
         if (!forcedDealerUsername.isNullOrBlank() && !forcedDealerPassword.isNullOrBlank()) {
             doLoginWith(forcedDealerUsername!!, forcedDealerPassword!!)
+            return
+        }
+
+        // If forceAccountName was requested (e.g. Dealer), but forcedDealerUsername is null (e.g. paused),
+        // we MUST STOP. We should NOT fall back to Franchise credentials and auto-login!
+        if (!forceAccountName.isNullOrBlank() && selectedIsp == "EBONE") {
+            loginAttemptInProgress = false
             return
         }
 
@@ -864,18 +851,9 @@ class WebViewLoginActivity : AppCompatActivity() {
             doLoginWith(ispUsername, ispPassword)
             return
         }
-        if (!targetZone.equals("Okara", ignoreCase = true)) {
-            loginAttemptInProgress = false
-            return
-        }
-        if (activeAccountName.isEmpty()) { loginAttemptInProgress = false; return }
-        val accounts = loadAccounts()
-        if (!accounts.has(activeAccountName)) { loginAttemptInProgress = false; return }
-        val acc = accounts.getJSONObject(activeAccountName)
-        val username = acc.optString("username", "")
-        val password = acc.optString("password", "")
-        if (username.isEmpty() || password.isEmpty()) { loginAttemptInProgress = false; return }
-        doLoginWith(username, password)
+
+        loginAttemptInProgress = false
+        // DO NOT auto-login, just wait on the loaded login page.
     }
 
     private fun doLoginWith(username: String, password: String, attempt: Int = 1) {

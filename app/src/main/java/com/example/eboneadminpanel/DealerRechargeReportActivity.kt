@@ -13,6 +13,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -42,14 +43,18 @@ class DealerRechargeReportActivity : AppCompatActivity() {
     private lateinit var summaryEbone: TextView
     private lateinit var summaryWateen: TextView
     private lateinit var summaryZong: TextView
+    private lateinit var summaryJazz: TextView
     
     private lateinit var cardEbone: LinearLayout
     private lateinit var cardWateen: LinearLayout
     private lateinit var cardZong: LinearLayout
+    private lateinit var cardJazz: LinearLayout
+    private lateinit var dealerFilterChip: TextView
 
     private var rangeStart: Long = 0
     private var rangeEnd: Long = 0
     private var activeIspFilter: String? = null
+    private var activeDealerFilter: String? = null
     
     private val masterList = mutableListOf<ReportEntry>()
     private val hiddenIds = mutableSetOf<String>()
@@ -128,9 +133,14 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(16), dp(16), dp(16), 0)
         }
-        chips.addView(filterChip("🗓️ Select Range") { pickCustomRange() })
+        dealerFilterChip = filterChip("👤 All Dealers") { pickDealerFilter() }
+        chips.addView(dealerFilterChip)
         chips.addView(filterChip("Today") { setTodayRange(); loadReport() })
+        chips.addView(filterChip("Yesterday") { setYesterdayRange(); loadReport() })
+        chips.addView(filterChip("7 Days") { set7DaysRange(); loadReport() })
         chips.addView(filterChip("This Month") { setThisMonthRange(); loadReport() })
+        chips.addView(filterChip("Last Month") { setLastMonthRange(); loadReport() })
+        chips.addView(filterChip("🗓️ Custom Range") { pickCustomRange() })
         filterScroll.addView(chips)
         root.addView(filterScroll)
 
@@ -143,31 +153,38 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         root.addView(filterLabel)
 
         val currentZone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
-        CityPermissionManager.isCompanyEnabled(this, currentZone, "EBONE") { eboneEnabled ->
+        CityPermissionManager.getEnabledCompanies(this, currentZone) { enabledCompanies ->
             val summaryRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                weightSum = if (eboneEnabled) 3f else 2f
+                weightSum = enabledCompanies.size.toFloat().coerceAtLeast(1f)
                 setPadding(dp(12), 0, dp(12), 0)
             }
             
-            val (eC, eT) = createSummaryCard("EBONE", orange)
-            cardEbone = eC; summaryEbone = eT
-            cardEbone.setOnClickListener { toggleIspFilter("EBONE") }
-            if (eboneEnabled) {
+            if (enabledCompanies.contains("EBONE")) {
+                val (eC, eT) = createSummaryCard("EBONE", orange)
+                cardEbone = eC; summaryEbone = eT
+                cardEbone.setOnClickListener { toggleIspFilter("EBONE") }
                 summaryRow.addView(cardEbone)
             }
+            if (enabledCompanies.contains("WATEEN")) {
+                val (wC, wT) = createSummaryCard("Wateen", navyMid)
+                cardWateen = wC; summaryWateen = wT
+                cardWateen.setOnClickListener { toggleIspFilter("Wateen") }
+                summaryRow.addView(cardWateen)
+            }
+            if (enabledCompanies.contains("ZONG")) {
+                val (zC, zT) = createSummaryCard("Zong", purple)
+                cardZong = zC; summaryZong = zT
+                cardZong.setOnClickListener { toggleIspFilter("Zong") }
+                summaryRow.addView(cardZong)
+            }
+            if (enabledCompanies.contains("JAZZ")) {
+                val (jC, jT) = createSummaryCard("Jazz", Color.parseColor("#E11D48"))
+                cardJazz = jC; summaryJazz = jT
+                cardJazz.setOnClickListener { toggleIspFilter("Jazz") }
+                summaryRow.addView(cardJazz)
+            }
 
-            val (wC, wT) = createSummaryCard("Wateen", navyMid)
-            val (zC, zT) = createSummaryCard("Zong", purple)
-            
-            cardWateen = wC; summaryWateen = wT
-            cardZong = zC; summaryZong = zT
-            
-            cardWateen.setOnClickListener { toggleIspFilter("Wateen") }
-            cardZong.setOnClickListener { toggleIspFilter("Zong") }
-
-            summaryRow.addView(cardWateen)
-            summaryRow.addView(cardZong)
             root.addView(summaryRow)
         }
 
@@ -256,11 +273,31 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         activeIspFilter = if (activeIspFilter == isp) null else isp
         
         // Border highlight remains blue, background stays white
-        cardEbone.background = outlinedPill(Color.WHITE, if(activeIspFilter == "EBONE") accentBlue else borderLight, 14)
-        cardWateen.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Wateen") accentBlue else borderLight, 14)
-        cardZong.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Zong") accentBlue else borderLight, 14)
+        if (::cardEbone.isInitialized) cardEbone.background = outlinedPill(Color.WHITE, if(activeIspFilter == "EBONE") accentBlue else borderLight, 14)
+        if (::cardWateen.isInitialized) cardWateen.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Wateen") accentBlue else borderLight, 14)
+        if (::cardZong.isInitialized) cardZong.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Zong") accentBlue else borderLight, 14)
+        if (::cardJazz.isInitialized) cardJazz.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Jazz") accentBlue else borderLight, 14)
         
         updateDisplayList()
+    }
+
+    private fun pickDealerFilter() {
+        val uniqueDealers = masterList.map { it.dealerName }.distinct().sorted()
+        if (uniqueDealers.isEmpty()) {
+            Toast.makeText(this, "No dealers found in this date range", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val options = mutableListOf("All Dealers")
+        options.addAll(uniqueDealers)
+
+        AlertDialog.Builder(this)
+            .setTitle("Filter by Dealer")
+            .setItems(options.toTypedArray()) { _, which ->
+                activeDealerFilter = if (which == 0) null else options[which]
+                dealerFilterChip.text = if (activeDealerFilter == null) "👤 All Dealers" else "👤 $activeDealerFilter"
+                updateDisplayList()
+            }
+            .show()
     }
 
     private fun setTodayRange() {
@@ -271,6 +308,25 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         filterLabel.text = "Showing: Today (${formatDate(rangeStart)})"
     }
 
+    private fun setYesterdayRange() {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        rangeStart = cal.timeInMillis
+        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59)
+        rangeEnd = cal.timeInMillis
+        filterLabel.text = "Showing: Yesterday (${formatDate(rangeStart)})"
+    }
+
+    private fun set7DaysRange() {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, -7)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+        rangeStart = cal.timeInMillis
+        rangeEnd = System.currentTimeMillis()
+        filterLabel.text = "Showing: Last 7 Days (${formatDate(rangeStart)} - Now)"
+    }
+
     private fun setThisMonthRange() {
         val cal = Calendar.getInstance()
         cal.set(Calendar.DAY_OF_MONTH, 1)
@@ -278,6 +334,18 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         rangeStart = cal.timeInMillis
         rangeEnd = System.currentTimeMillis()
         filterLabel.text = "Showing: This Month (${formatDate(rangeStart)} - Now)"
+    }
+
+    private fun setLastMonthRange() {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.MONTH, -1)
+        cal.set(Calendar.DAY_OF_MONTH, 1)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+        rangeStart = cal.timeInMillis
+        cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
+        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59)
+        rangeEnd = cal.timeInMillis
+        filterLabel.text = "Showing: Last Month (${formatDate(rangeStart)} - ${formatDate(rangeEnd)})"
     }
 
     private fun pickCustomRange() {
@@ -296,48 +364,88 @@ class DealerRechargeReportActivity : AppCompatActivity() {
     private fun formatDate(ms: Long): String = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(ms))
 
     private fun loadReport() {
-        db.collection("dealerPayments")
-            .whereGreaterThanOrEqualTo("submittedAt", rangeStart)
-            .whereLessThanOrEqualTo("submittedAt", rangeEnd)
-            .orderBy("submittedAt", Query.Direction.DESCENDING)
+        masterList.clear()
+
+        val onLoaded: () -> Unit = {
+            masterList.sortByDescending { it.timestamp }
+            updateDisplayList()
+        }
+
+        db.collection("dealerTransactions")
+            .whereGreaterThanOrEqualTo("createdAt", rangeStart)
+            .whereLessThanOrEqualTo("createdAt", rangeEnd)
             .get()
             .addOnSuccessListener { snapshot ->
-                masterList.clear()
                 snapshot.documents.forEach { doc ->
                     if (!CompanyDataHelper.belongsToCurrentCompany(this@DealerRechargeReportActivity, doc)) return@forEach
-                    val p = doc.getString("panel") ?: ""
-                    val ispName = when(p.uppercase()) {
-                        "EBONE", "EBILL" -> "EBONE"
-                        "WATEEN" -> "Wateen"
-                        "ZONG" -> "Zong"
-                        else -> p
+                    val status = doc.getString("status") ?: ""
+                    val transferStatus = doc.getString("transferStatus") ?: ""
+                    if (status == "COMPLETED" || status == "VERIFIED" || transferStatus == "TRANSFERRED") {
+                        val p = doc.getString("panel") ?: doc.getString("company") ?: ""
+                        val ispName = when (p.uppercase()) {
+                            "EBONE", "EBILL" -> "EBONE"
+                            "WATEEN" -> "Wateen"
+                            "ZONG" -> "Zong"
+                            "JAZZ" -> "Jazz"
+                            else -> p
+                        }
+                        val dName = doc.getString("dealerName") ?: doc.getString("name") ?: "Unknown Dealer"
+                        val amt = doc.getDouble("amount") ?: 0.0
+                        val ts = doc.getLong("createdAt") ?: doc.getLong("submittedAt") ?: System.currentTimeMillis()
+                        masterList.add(ReportEntry(doc.id, dName, ispName, amt, ts))
                     }
-                    masterList.add(ReportEntry(doc.id, doc.getString("dealerName") ?: "Unknown", ispName, doc.getDouble("amount") ?: 0.0, doc.getLong("submittedAt") ?: 0L))
                 }
-                updateDisplayList()
-            }
+
+                db.collection("dealerPayments")
+                    .whereGreaterThanOrEqualTo("submittedAt", rangeStart)
+                    .whereLessThanOrEqualTo("submittedAt", rangeEnd)
+                    .get()
+                    .addOnSuccessListener { snap2 ->
+                        snap2.documents.forEach { doc ->
+                            if (!CompanyDataHelper.belongsToCurrentCompany(this@DealerRechargeReportActivity, doc)) return@forEach
+                            if (masterList.none { it.id == doc.id }) {
+                                val p = doc.getString("panel") ?: ""
+                                val ispName = when (p.uppercase()) {
+                                    "EBONE", "EBILL" -> "EBONE"
+                                    "WATEEN" -> "Wateen"
+                                    "ZONG" -> "Zong"
+                                    "JAZZ" -> "Jazz"
+                                    else -> p
+                                }
+                                val dName = doc.getString("dealerName") ?: "Unknown"
+                                val amt = doc.getDouble("amount") ?: 0.0
+                                val ts = doc.getLong("submittedAt") ?: System.currentTimeMillis()
+                                masterList.add(ReportEntry(doc.id, dName, ispName, amt, ts))
+                            }
+                        }
+                        onLoaded()
+                    }.addOnFailureListener { onLoaded() }
+            }.addOnFailureListener { onLoaded() }
     }
 
     private fun updateDisplayList() {
         // 1. Calculate Summary Card totals (always based on unhidden items, ignoring ISP filter)
         val unhiddenItems = masterList.filter { !hiddenIds.contains(it.id) }
-        var totalE = 0.0; var totalW = 0.0; var totalZ = 0.0
+        var totalE = 0.0; var totalW = 0.0; var totalZ = 0.0; var totalJ = 0.0
         
         unhiddenItems.forEach { 
             when(it.panel) {
                 "EBONE" -> totalE += it.amount
                 "Wateen" -> totalW += it.amount
                 "Zong" -> totalZ += it.amount
+                "Jazz" -> totalJ += it.amount
             }
         }
         
-        summaryEbone.text = "Rs. ${"%,.0f".format(totalE)}"
-        summaryWateen.text = "Rs. ${"%,.0f".format(totalW)}"
-        summaryZong.text = "Rs. ${"%,.0f".format(totalZ)}"
+        if (::summaryEbone.isInitialized) summaryEbone.text = "Rs. ${"%,.0f".format(totalE)}"
+        if (::summaryWateen.isInitialized) summaryWateen.text = "Rs. ${"%,.0f".format(totalW)}"
+        if (::summaryZong.isInitialized) summaryZong.text = "Rs. ${"%,.0f".format(totalZ)}"
+        if (::summaryJazz.isInitialized) summaryJazz.text = "Rs. ${"%,.0f".format(totalJ)}"
         
-        // 2. Filter the RecyclerView list based on both hidden items AND active ISP selection
+        // 2. Filter the RecyclerView list based on hidden items, active ISP selection AND active Dealer selection
         val filteredList = unhiddenItems.filter { 
-            activeIspFilter == null || it.panel == activeIspFilter
+            (activeIspFilter == null || it.panel == activeIspFilter) &&
+            (activeDealerFilter == null || it.dealerName.equals(activeDealerFilter, true))
         }
         adapter.submitList(filteredList)
         
@@ -379,7 +487,17 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             top.addView(TextView(ctx).apply { text = "Rs. ${"%,.0f".format(item.amount)}"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(green) })
             row.addView(top)
             val bot = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, 0) }
-            bot.addView(TextView(ctx).apply { text = item.panel; textSize = 12f; setTypeface(null, Typeface.BOLD); setTextColor(when(item.panel) { "Wateen" -> navyMid; "Zong" -> purple; else -> orange }) })
+            bot.addView(TextView(ctx).apply { 
+                text = item.panel
+                textSize = 12f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(when(item.panel) { 
+                    "Wateen" -> navyMid
+                    "Zong" -> purple
+                    "Jazz" -> Color.parseColor("#E11D48")
+                    else -> orange 
+                }) 
+            })
             bot.addView(TextView(ctx).apply { text = "  •  " + SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(item.timestamp)); textSize = 11f; setTextColor(textMuted) })
             row.addView(bot)
             (h.itemView as ViewGroup).apply { removeAllViews(); addView(row) }

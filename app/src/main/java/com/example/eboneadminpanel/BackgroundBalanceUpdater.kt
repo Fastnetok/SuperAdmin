@@ -36,40 +36,44 @@ object BackgroundBalanceUpdater {
                 onComplete(null)
             }
         }
-        handler.postDelayed(timeoutRunnable, 45000)
+        val timeoutMs = if (isp.uppercase() == "WATEEN") 35000L else 20000L
+        handler.postDelayed(timeoutRunnable, timeoutMs)
 
         var username = IspPanelSettingsActivity.getSavedUsername(context, isp, zone)
         var password = IspPanelSettingsActivity.getSavedPassword(context, isp, zone)
+        var accountCookie = ""
 
-        if (username.isNullOrEmpty() || password.isNullOrEmpty()) {
-            val cleanZone = zone.trim().lowercase().replace("-", "_")
-            val prefName = when (isp.uppercase()) {
-                "EBONE" -> "ebill_accounts_$cleanZone"
-                "WATEEN" -> "wateen_accounts_$cleanZone"
-                "ZONG" -> "zong_accounts_$cleanZone"
-                "JAZZ" -> "jazz_accounts_$cleanZone"
-                else -> "${isp.lowercase()}_accounts_$cleanZone"
-            }
-            try {
-                val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-                val sp = EncryptedSharedPreferences.create(context, prefName, masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
-                val raw = sp.getString("accounts_json", "") ?: ""
-                if (raw.isNotEmpty()) {
-                    val jsonObj = JSONObject(raw)
-                    val active = sp.getString("active_account", "") ?: ""
-                    val key = if (active.isNotEmpty() && jsonObj.has(active)) active else if (jsonObj.keys().hasNext()) jsonObj.keys().next() else null
-                    if (key != null) {
-                        val acc = jsonObj.getJSONObject(key)
-                        val u = acc.optString("username", "")
-                        val p = acc.optString("password", "")
-                        if (u.isNotEmpty() && p.isNotEmpty()) {
-                            username = u
-                            password = p
-                        }
+        val cleanZone = zone.trim().lowercase().replace("-", "_")
+        val prefName = when (isp.uppercase()) {
+            "EBONE" -> "ebill_accounts_$cleanZone"
+            "WATEEN" -> "wateen_accounts_$cleanZone"
+            "ZONG" -> "zong_accounts_$cleanZone"
+            "JAZZ" -> "jazz_accounts_$cleanZone"
+            else -> "${isp.lowercase()}_accounts_$cleanZone"
+        }
+        try {
+            val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            val sp = EncryptedSharedPreferences.create(context, prefName, masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+            val raw = sp.getString("accounts_json", "") ?: ""
+            if (raw.isNotEmpty()) {
+                val jsonObj = JSONObject(raw)
+                val active = sp.getString("active_account", "") ?: ""
+                val key = if (active.isNotEmpty() && jsonObj.has(active)) active else if (jsonObj.keys().hasNext()) jsonObj.keys().next() else null
+                if (key != null) {
+                    val acc = jsonObj.getJSONObject(key)
+                    val u = acc.optString("username", "")
+                    val p = acc.optString("password", "")
+                    val c = acc.optString("cookie", "")
+                    if (u.isNotEmpty() && p.isNotEmpty()) {
+                        if (username.isNullOrEmpty()) username = u
+                        if (password.isNullOrEmpty()) password = p
+                    }
+                    if (c.isNotEmpty()) {
+                        accountCookie = c
                     }
                 }
-            } catch (_: Exception) {}
-        }
+            }
+        } catch (_: Exception) {}
 
         if (username.isNullOrEmpty() || password.isNullOrEmpty()) {
             Log.e(TAG, "Credentials not found for $isp/$zone")
@@ -79,29 +83,14 @@ object BackgroundBalanceUpdater {
             return
         }
 
-        // Restore Cookies
-        val savedCookie = getIspSessionCookie(context, isp, zone)
-        val domain = when (isp.uppercase()) {
-            "WATEEN" -> "https://panel.wateen.com"
-            "ZONG" -> "https://turbonet.zong.com.pk"
-            "JAZZ" -> "https://biz.jazzftth.pk"
-            else -> "https://partner.ebill.pk"
-        }
+        val generalCookie = getIspSessionCookie(context, isp, zone)
+        val savedCookie = if (accountCookie.isNotEmpty()) accountCookie else generalCookie
 
-        val loginUrl = if (savedCookie.isNotEmpty()) {
-            when (isp.uppercase()) {
-                "WATEEN" -> "https://panel.wateen.com/user/user/all"
-                "ZONG" -> "https://turbonet.zong.com.pk/index.php"
-                "JAZZ" -> "https://biz.jazzftth.pk/dashboard"
-                else -> "https://partner.ebill.pk/clients"
-            }
-        } else {
-            when (isp.uppercase()) {
-                "WATEEN" -> "https://panel.wateen.com/auth.html"
-                "ZONG" -> "https://turbonet.zong.com.pk/login.php"
-                "JAZZ" -> "https://biz.jazzftth.pk/users/login"
-                else -> "https://partner.ebill.pk/logincheck"
-            }
+        val loginUrl = when (isp.uppercase()) {
+            "WATEEN" -> "https://panel.wateen.com/auth.html"
+            "ZONG" -> "https://turbonet.zong.com.pk/login.php"
+            "JAZZ" -> "https://biz.jazzftth.pk/users/login"
+            else -> "https://partner.ebill.pk/logincheck"
         }
 
         handler.post {
@@ -116,10 +105,20 @@ object BackgroundBalanceUpdater {
                 webView.settings.userAgentString = "Mozilla/5.0 (Linux; Android 6.0) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
             }
 
-            // Restore session cookies
+            // Restore Cookies
+            val domain = when (isp.uppercase()) {
+                "WATEEN" -> "https://panel.wateen.com"
+                "ZONG" -> "https://turbonet.zong.com.pk"
+                "JAZZ" -> "https://biz.jazzftth.pk"
+                else -> "https://partner.ebill.pk"
+            }
+
+            // Isolated cleanup before restoring session cookie
             val cm = CookieManager.getInstance()
             cm.setAcceptCookie(true)
             cm.setAcceptThirdPartyCookies(webView, true)
+            cm.removeAllCookies(null)
+            cm.flush()
 
             if (savedCookie.isNotEmpty()) {
                 savedCookie.split(";").forEach { part ->
@@ -139,6 +138,7 @@ object BackgroundBalanceUpdater {
                     val currentDomain = when (isp.uppercase()) {
                         "WATEEN" -> "https://panel.wateen.com"
                         "ZONG" -> "https://turbonet.zong.com.pk"
+                        "JAZZ" -> "https://biz.jazzftth.pk"
                         else -> "https://partner.ebill.pk"
                     }
                     val currentCookie = CookieManager.getInstance().getCookie(currentDomain)
@@ -146,23 +146,27 @@ object BackgroundBalanceUpdater {
                         saveIspSessionCookie(context, isp, zone, currentCookie)
                     }
 
-                    if (url.contains("login") || url.contains("auth.html")) {
+                    if (url.contains("login") || url.contains("auth.html") || url.contains("users/login")) {
                         if (!loginAttempted) {
                             loginAttempted = true
                             Log.d(TAG, "Attempting background login for $isp/$zone")
                             val script = """
                                 (function(){
-                                    var u = document.querySelector('input[name=username], input[name=email], #username, input[type=text]');
-                                    var p = document.querySelector('input[name=password], #password, input[type=password]');
-                                    var b = document.querySelector('button[type=submit], input[type=submit], #send, .btn-primary, .btn-login');
-                                    if(u && p && b){
+                                    var u = document.querySelector('input[name=username], input[name=email], input[name=user], #username, input[type=text]');
+                                    var p = document.querySelector('input[name=password], input[name=pass], #password, input[type=password]');
+                                    var b = document.querySelector('button[type=submit], input[type=submit], #send, .btn-primary, .btn-login, button');
+                                    if(u && p){
                                         u.value = '$username';
                                         u.dispatchEvent(new Event('input', {bubbles: true}));
                                         u.dispatchEvent(new Event('change', {bubbles: true}));
                                         p.value = '$password';
                                         p.dispatchEvent(new Event('input', {bubbles: true}));
                                         p.dispatchEvent(new Event('change', {bubbles: true}));
-                                        b.click();
+                                        if(b){ b.click(); }
+                                        else {
+                                            var f = u.closest('form');
+                                            if(f) f.submit();
+                                        }
                                         return 'clicked';
                                     }
                                     return 'fields_not_found';
@@ -180,23 +184,29 @@ object BackgroundBalanceUpdater {
                                     balanceReadAttempted = true
                                     isFinished = true
                                     handler.removeCallbacks(timeoutRunnable)
-                                    webView.destroy()
+                                    webView.postDelayed({ webView.destroy() }, 200L)
                                     onComplete(balance)
                                 } else {
                                     // Retry logic for dynamic rendering
-                                    if (readRetryCount < 12) {
+                                    val maxRetries = if (isp.uppercase() == "WATEEN") 12 else 8
+                                    val retryDelay = if (isp.uppercase() == "WATEEN") 1500L else 1000L
+                                    if (readRetryCount < maxRetries) {
                                         readRetryCount++
                                         Log.d(TAG, "Balance not found, retry $readRetryCount for $isp")
                                         handler.postDelayed({
                                             if (!isFinished) onPageFinished(webView, webView.url)
-                                        }, 300L)
+                                        }, retryDelay)
                                     } else {
-                                        // Final attempt failed
                                         if (isp.uppercase() == "WATEEN" && !url.contains("accounting/mybalance")) {
                                             webView.loadUrl("https://panel.wateen.com/")
                                         } else {
-                                            // Exhausted retries
                                             Log.e(TAG, "Exhausted retries for $isp balance check")
+                                            if (!isFinished) {
+                                                isFinished = true
+                                                handler.removeCallbacks(timeoutRunnable)
+                                                try { webView.destroy() } catch (_: Exception) {}
+                                                onComplete(null)
+                                            }
                                         }
                                     }
                                 }
@@ -255,6 +265,13 @@ object BackgroundBalanceUpdater {
                     if(m) return m[1];
                     var m2 = text.match(/Account Credit[^0-9\-]*(-?[0-9,]+(\.[0-9]+)?)/i);
                     return m2 ? m2[1] : null;
+                })()
+            """.trimIndent()
+            "JAZZ" -> """
+                (function(){
+                    var text = document.body.innerText || '';
+                    var m = text.match(/Balance[^0-9\-]*(-?[0-9,]+(\.[0-9]+)?)/i);
+                    return m ? m[1] : null;
                 })()
             """.trimIndent()
             else -> ""

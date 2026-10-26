@@ -72,9 +72,23 @@ object FranchiseBalanceManager {
     }
 
     fun updateBalance(context: Context, panel: String, balance: Double, zone: String = "Okara", onDone: (Boolean) -> Unit = {}) {
-        getDoc(context, zone).set(mapOf(balanceField(panel, zone) to balance), SetOptions.merge())
-            .addOnSuccessListener { onDone(true) }
-            .addOnFailureListener { onDone(false) }
+        val baseField = "${panelKey(panel)}Balance"
+        val zoneField = "${baseField}_$zone"
+        val updateMap = mapOf(
+            baseField to balance,
+            zoneField to balance,
+            "lastUpdated" to System.currentTimeMillis()
+        )
+        val firestore = FirebaseFirestore.getInstance()
+        val docId = CompanyDataHelper.getCurrentCompanyId(context) ?: CompanyDataHelper.getCanonicalDocId(zone)
+        val canonicalId = CompanyDataHelper.getCanonicalDocId(docId)
+
+        val batch = firestore.batch()
+        batch.set(firestore.collection("franchiseSettings").document(docId), updateMap, SetOptions.merge())
+        if (canonicalId != docId && canonicalId.isNotBlank()) {
+            batch.set(firestore.collection("franchiseSettings").document(canonicalId), updateMap, SetOptions.merge())
+        }
+        batch.commit().addOnSuccessListener { onDone(true) }.addOnFailureListener { onDone(false) }
     }
 
     fun checkAndNotifyLowBalance(context: Context, panel: String, balance: Double, zone: String = "Okara") {

@@ -66,6 +66,7 @@ class JazzWebViewActivity : AppCompatActivity() {
         // Pre-fill saved credentials (support custom url if configured in IspPanelSettingsActivity)
         val savedUser = IspPanelSettingsActivity.getSavedUsername(this, "JAZZ", targetZone) ?: ""
         val savedPass = IspPanelSettingsActivity.getSavedPassword(this, "JAZZ", targetZone) ?: ""
+        
         if (savedUser.isNotEmpty()) etUsername.setText(savedUser)
         if (savedPass.isNotEmpty()) etPassword.setText(savedPass)
 
@@ -140,9 +141,13 @@ class JazzWebViewActivity : AppCompatActivity() {
                 }
 
                 if (url.contains("login") || url.contains("users/login")) {
-                    if (!loginAttemptInProgress) {
-                        loginAttemptInProgress = true
-                        webView.postDelayed({ parseAndExecuteAutoLogin() }, 2000)
+                    webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText : ''; })()") { bodyText ->
+                        if (bodyText != null && (bodyText.contains("Invalid username or password", ignoreCase = true) || bodyText.contains("Incorrect", ignoreCase = true) || bodyText.contains("login_error", ignoreCase = true))) {
+                            showInvalidCredentialsPopup("JAZZ", targetZone)
+                        } else if (!loginAttemptInProgress) {
+                            loginAttemptInProgress = true
+                            webView.postDelayed({ parseAndExecuteAutoLogin() }, 2000)
+                        }
                     }
                 } else if (url.contains("jazzftth.pk") || url.contains("biz.jazzftth.pk")) {
                     if (!url.contains("login") && !url.contains("users/login")) {
@@ -164,6 +169,13 @@ class JazzWebViewActivity : AppCompatActivity() {
     }
 
     private fun parseAndExecuteAutoLogin() {
+        val savedUser = IspPanelSettingsActivity.getSavedUsername(this, "JAZZ", targetZone) ?: ""
+        if (savedUser.isEmpty()) {
+            Toast.makeText(this, "Auto-login aborted: Account is disabled or missing in ISP Panel Settings.", Toast.LENGTH_LONG).show()
+            updateStatus("Account disabled in ISP Panel Settings.")
+            return
+        }
+
         val username = etUsername.text.toString().trim()
         val password = etPassword.text.toString().trim()
 
@@ -298,6 +310,22 @@ class JazzWebViewActivity : AppCompatActivity() {
                 Toast.makeText(this, "Could not read Jazz balance", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun showInvalidCredentialsPopup(isp: String, zone: String) {
+        AlertDialog.Builder(this)
+            .setTitle("⚠️ $isp Login Failed ($zone)")
+            .setMessage("Invalid username or password detected. Please verify your login credentials in ISP Panel Settings.")
+            .setPositiveButton("Open ISP Settings") { _, _ ->
+                startActivity(Intent(this, IspPanelSettingsActivity::class.java))
+                finish()
+            }
+            .setNegativeButton("Close") { dialog, _ ->
+                dialog.dismiss()
+                finish()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun getIspSessionCookie(isp: String, zone: String): String {

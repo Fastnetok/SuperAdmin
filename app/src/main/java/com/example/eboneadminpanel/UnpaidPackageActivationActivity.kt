@@ -113,7 +113,7 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
     // NEW: single shared dealer name used for EVERY EBONE action in this
     // screen — the URL button, Activate on Relief, and Reactivate all
     // force this exact dealer, never the Franchise account.
-    private val RELIEF_DEALER_NAME = "Akmal"
+    private val RELIEF_DEALER_NAME = "FastNet"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -217,7 +217,7 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
         // saved account), lands on the all-customers list, and stops
         // there — no further automatic navigation.
         customerUrl.setOnClickListener {
-            launchAkmalDealerAllUsersList()
+            launchFastNetFranchiseAllUsersList()
         }
 
         findViewById<ImageButton>(R.id.btnBack).apply {
@@ -491,10 +491,6 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
             putExtra("selected_isp", company)
             putExtra("auto_activate_customer_id", customerId)
             putExtra("customer_url", customerUrl.text.toString().trim().ifBlank { companyUrlFor(company) })
-            putExtra("use_dealer_account", company.equals("EBONE", true))
-            if (company.equals("EBONE", true)) {
-                putExtra("dealer_account_name", RELIEF_DEALER_NAME)
-            }
             putExtra("manual_action", "SUSPEND")
             putExtra("target_zone", "Okara")
         }
@@ -527,10 +523,6 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
             putExtra("selected_isp", company)
             putExtra("auto_activate_customer_id", customerId)
             putExtra("customer_url", customerUrl.text.toString().trim().ifBlank { companyUrlFor(company) })
-            putExtra("use_dealer_account", company.equals("EBONE", true))
-            if (company.equals("EBONE", true)) {
-                putExtra("dealer_account_name", RELIEF_DEALER_NAME)
-            }
             putExtra("manual_action", "ENABLE")
             putExtra("target_zone", "Okara")
         }
@@ -786,7 +778,7 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
         customerUrl.setText(companyUrlFor(company))
     }
 
-    private fun launchAkmalDealerAllUsersList() {
+    private fun launchFastNetFranchiseAllUsersList() {
         val company =
             spinnerCompany.selectedItem?.toString()
                 ?.trim()
@@ -795,8 +787,6 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
 
         val intent = Intent(this, WebViewLoginActivity::class.java).apply {
             putExtra("selected_isp", company)
-            putExtra("use_dealer_account", true)
-            putExtra("dealer_account_name", RELIEF_DEALER_NAME)
             putExtra("target_zone", "Okara")
         }
 

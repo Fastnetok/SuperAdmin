@@ -94,8 +94,8 @@ class LiveBatchResolveActivity : AppCompatActivity() {
             return
         }
         val complaint = eboneQueue[index]
-        val user = IspPanelSettingsActivity.getDealerUsername(this, "EBONE", "Okara", "Akmal") ?: ""
-        val pass = IspPanelSettingsActivity.getDealerPassword(this, "EBONE", "Okara", "Akmal") ?: ""
+        val user = IspPanelSettingsActivity.getDealerUsername(this, "EBONE", "Okara", "FastNet") ?: ""
+        val pass = IspPanelSettingsActivity.getDealerPassword(this, "EBONE", "Okara", "FastNet") ?: ""
         
         wvEbone.webViewClient = object : WebViewClient() {
             var loggedIn = false

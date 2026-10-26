@@ -257,9 +257,9 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             return
         }
 
-        val zone = "Okara"
-        val user = IspPanelSettingsActivity.getDealerUsername(this, "EBONE", zone, "Akmal") ?: ""
-        val pass = IspPanelSettingsActivity.getDealerPassword(this, "EBONE", zone, "Akmal") ?: ""
+        val zone = CompanyDataHelper.getCurrentCompanyId(this) ?: "Okara"
+        val user = IspAccountResolver.getActiveUsername(this, "EBONE", zone, "New Complaints") ?: ""
+        val pass = IspAccountResolver.getActivePassword(this, "EBONE", zone, "New Complaints") ?: ""
 
         if (user.isEmpty() || pass.isEmpty()) {
             adapter.updateOnlineStatus(complaint.complaintId, false)
@@ -312,7 +312,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                     } else {
                         if (!searchAttempted) {
                             searchAttempted = true
-                            webView.evaluateJavascript("(function(){ var targetUser = '${complaint.userId}'.toLowerCase().trim(); var box = document.querySelector('$searchSelector'); if(box){ box.value = ''; box.focus(); box.value = targetUser; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ var table = document.getElementById('example1'); var result = 'failed'; if(table){ var emptyRow = table.querySelector('.dataTables_empty'); if(!emptyRow){ var rows = table.querySelectorAll('tbody tr'); for(var i=0; i<rows.length; i++){ var rowText = rows[i].innerText.toLowerCase(); if(rowText.indexOf(targetUser) > -1){ result = 'success'; break; } } } } window.location.href = 'resolve://' + result; }, 800); } else { window.location.href = '$onlineUrl'; } })();", null)
+                            webView.evaluateJavascript("(function(){ var targetUser = '${complaint.userId}'.toLowerCase().trim(); var box = document.querySelector('$searchSelector'); if(box){ box.value = ''; box.focus(); box.value = targetUser; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ var table = document.getElementById('example1') || document.querySelector('table'); var result = 'failed'; if(table){ var emptyRow = table.querySelector('.dataTables_empty'); if(!emptyRow){ var rows = table.querySelectorAll('tbody tr'); for(var i=0; i<rows.length; i++){ var rowText = rows[i].innerText.toLowerCase(); if(rowText.indexOf(targetUser) > -1){ result = 'success'; break; } } } } if(result === 'failed' && document.body.innerText.toLowerCase().indexOf(targetUser) > -1){ result = 'success'; } window.location.href = 'resolve://' + result; }, 1200); } else { if(document.body.innerText.toLowerCase().indexOf(targetUser) > -1){ window.location.href = 'resolve://success'; } else { window.location.href = '$onlineUrl'; } } })();", null)
                         }
                     }
                 }
@@ -352,9 +352,9 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             return
         }
 
-        val zone = "Okara"
-        val user = IspPanelSettingsActivity.getSavedUsername(this, "WATEEN", zone) ?: ""
-        val pass = IspPanelSettingsActivity.getSavedPassword(this, "WATEEN", zone) ?: ""
+        val zone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
+        val user = IspAccountResolver.getActiveUsername(this, "WATEEN", zone, "New Complaints") ?: ""
+        val pass = IspAccountResolver.getActivePassword(this, "WATEEN", zone, "New Complaints") ?: ""
 
         if (user.isEmpty() || pass.isEmpty()) {
             adapter.updateOnlineStatus(complaint.complaintId, false)
@@ -369,9 +369,12 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         val webView = getOrCreateWateenWebView()
 
         val savedCookie = getIspSessionCookie("WATEEN", zone)
-        if (savedCookie.isNotEmpty()) {
+        val initialUrl = if (savedCookie.isNotEmpty()) {
             savedCookie.split(";").forEach { CookieManager.getInstance().setCookie("https://panel.wateen.com", it.trim()) }
             CookieManager.getInstance().flush()
+            onlineUrl
+        } else {
+            loginUrl
         }
 
         var isFinished = false
@@ -432,7 +435,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl(loginUrl)
+        webView.loadUrl(initialUrl)
     }
 
     private fun processNextZong() {
@@ -447,7 +450,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             return
         }
 
-        val zone = "Okara"
+        val zone = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
         val user = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", zone) ?: ""
         val pass = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", zone) ?: ""
 
@@ -464,9 +467,12 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         val webView = getOrCreateZongWebView()
 
         val savedCookie = getIspSessionCookie("ZONG", zone)
-        if (savedCookie.isNotEmpty()) {
+        val initialUrl = if (savedCookie.isNotEmpty()) {
             savedCookie.split(";").forEach { CookieManager.getInstance().setCookie("https://turbonet.zong.com.pk", it.trim()) }
             CookieManager.getInstance().flush()
+            onlineUrl
+        } else {
+            loginUrl
         }
 
         var isFinished = false
@@ -479,7 +485,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 processNextZong()
             }
         }
-        handler.postDelayed(timeoutRunnable, 25000)
+        handler.postDelayed(timeoutRunnable, 5000)
 
         webView.webViewClient = object : WebViewClient() {
             var loginAttempted = false
@@ -502,7 +508,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                     } else {
                         if (!searchAttempted) {
                             searchAttempted = true
-                            webView.evaluateJavascript("(function(){ var box = document.querySelector('$searchSelector'); if(box){ box.value = '${complaint.userId}'; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ if(document.body.innerText.indexOf('${complaint.userId}') > -1){ window.location.href = \"resolve://success\"; } else { window.location.href = \"resolve://failed\"; } }, 3000); } else { window.location.href = \"resolve://failed\"; } })()", null)
+                            webView.evaluateJavascript("(function(){ var box = document.querySelector('$searchSelector'); if(box){ box.value = '${complaint.userId}'; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ if(document.body.innerText.indexOf('${complaint.userId}') > -1){ window.location.href = \"resolve://success\"; } else { window.location.href = \"resolve://failed\"; } }, 500); } else { window.location.href = \"resolve://failed\"; } })()", null)
                         }
                     }
                 }
@@ -527,7 +533,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl(loginUrl)
+        webView.loadUrl(initialUrl)
     }
 
     override fun onDestroy() {

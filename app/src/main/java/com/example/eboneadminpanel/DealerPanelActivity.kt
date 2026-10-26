@@ -24,6 +24,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -32,6 +33,7 @@ import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
+import com.google.firebase.database.FirebaseDatabase
 import androidx.core.util.Pair as AndroidPair
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.firebase.firestore.DocumentReference
@@ -63,10 +65,12 @@ class DealerPanelActivity : AppCompatActivity() {
 
     private var dealerCount = 0
     private var totalBalance = 0.0
+    private var currentPendingCount = 0
     private var activeStatFilter: String? = null 
     private val dealersWithPending = HashSet<String>() // NEW: IDs of dealers with pending txn
 
     private val dealerNameCache = HashMap<String, String>()
+    private val inspectorAuthManager = InspectorAuthManager()
 
     private var pendingFetchIdInput: EditText? = null
     private val REQUEST_FETCH_DEALER_ID = 7001
@@ -108,17 +112,23 @@ class DealerPanelActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("dealer_panel_prefs", MODE_PRIVATE)
         isBackgroundMode = prefs.getBoolean("is_background_mode", false)
         
-        val screenContent = buildScreen()
-        swipeRefreshLayout = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this).apply {
-            addView(screenContent)
-            setOnRefreshListener {
-                startAutoUpdate()
-            }
-        }
-        setContentView(swipeRefreshLayout)
+        setContentView(buildScreen())
         observeDealers()
         observePending()
         observeFranchiseBalances()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activeStatFilter = "DEALERS"
+        observeDealers()
+        observePending()
+        observeFranchiseBalances()
+    }
+
+    override fun onStop() {
+        inspectorAuthManager.resetSession()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -144,10 +154,15 @@ class DealerPanelActivity : AppCompatActivity() {
 
     // ===================== SCREEN =====================
 
-    private fun buildScreen(): LinearLayout {
+    private fun buildScreen(): View {
+        val mainScroll = androidx.core.widget.NestedScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(bgLight)
+        }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bgLight)
+            setPadding(0, 0, 0, dp(32))
         }
 
         root.addView(buildHeader())
@@ -155,6 +170,8 @@ class DealerPanelActivity : AppCompatActivity() {
 
         val franchiseBalancesScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
+            isSmoothScrollingEnabled = true
+            overScrollMode = View.OVER_SCROLL_NEVER
         }
         franchiseBalancesRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -178,7 +195,7 @@ class DealerPanelActivity : AppCompatActivity() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    dealerSearchQuery = s?.toString()?.lowercase() ?: ""
+                    dealerSearchQuery = s?.toString()?.trim()?.lowercase(Locale.getDefault()) ?: ""
                     observeDealers() // Trigger re-filter
                 }
                 override fun afterTextChanged(s: Editable?) {}
@@ -194,22 +211,15 @@ class DealerPanelActivity : AppCompatActivity() {
         }
         root.addView(pendingList)
 
-        val dealersScroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
-        }
-        val dealersContent = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        dealersContent.addView(sectionTitle("Dealers"))
+        root.addView(sectionTitle("Dealers"))
         dealerList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), 0, dp(16), dp(24))
         }
-        dealersContent.addView(dealerList)
-        dealersScroll.addView(dealersContent)
-        root.addView(dealersScroll)
+        root.addView(dealerList)
 
-        return root
+        mainScroll.addView(root)
+        return mainScroll
     }
 
     private fun buildHeader(): LinearLayout {
@@ -272,9 +282,7 @@ class DealerPanelActivity : AppCompatActivity() {
         iconRow.addView(spacerH(8))
         iconRow.addView(iconButton("🔍") { inspectEbonePanel() })
         iconRow.addView(spacerH(8))
-        iconRow.addView(iconButton("💸") { openSendPaymentScreen() })
-        iconRow.addView(spacerH(8))
-        iconRow.addView(iconButton("💰") { checkEboneBalance() })
+        iconRow.addView(iconButton("👥") { openSendPaymentScreen() })
         iconRow.addView(spacerH(8))
         iconRow.addView(iconButton("📄") { startActivity(Intent(this, DealerPaymentLogActivity::class.java)) })
         iconRow.addView(spacerH(8))
@@ -407,8 +415,8 @@ class DealerPanelActivity : AppCompatActivity() {
     // ===================== DEALERS (LIVE) =====================
 
     private fun observeDealers() {
+        dealersListener?.remove()
         dealersListener = db.collection("dealers")
-            .orderBy("name")
             .addSnapshotListener { query, error ->
                 if (error != null || query == null) {
                     Toast.makeText(this, "Dealer list load failed: ${error?.message}", Toast.LENGTH_LONG).show()
@@ -417,65 +425,175 @@ class DealerPanelActivity : AppCompatActivity() {
                 lastDealerQuery = query
                 renderDealers(query)
             }
+
+        FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+            .getReference("dealers")
+            .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                    for (child in snapshot.children) {
+                        if (CompanyDataHelper.belongsToCurrentCompany(this@DealerPanelActivity, child)) {
+                            val id = child.key ?: continue
+                            val name = child.child("name").getValue(String::class.java) ?: ""
+                            if (id.isNotBlank() && name.isNotBlank()) {
+                                dealerNameCache[id] = name
+                            }
+                        }
+                    }
+                }
+
+                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+            })
+    }
+
+    private fun isMatchingCompanyOrZone(context: Context, doc: DocumentSnapshot): Boolean {
+        val session = com.example.superadmin.core.SessionManager(context)
+        val activeRaw = session.getActiveCompanyId()?.trim()?.takeIf { it.isNotBlank() }
+            ?: session.getCompanyId()?.trim()?.takeIf { it.isNotBlank() }
+            ?: CompanyDataHelper.getCurrentCompanyId(context)
+            ?: "OKA-001"
+
+        if (activeRaw.equals("ALL", ignoreCase = true)) {
+            return true
+        }
+
+        val cleanActive = activeRaw.trim().uppercase()
+        val canonicalActive = CompanyDataHelper.getCanonicalDocId(cleanActive).uppercase()
+        val normActive = cleanActive.replace("-", "").replace("_", "").replace(" ", "")
+        val prefixActive = normActive.take(3)
+
+        val dComp = (doc.getString("companyId") ?: doc.getString("company") ?: "").trim().uppercase()
+        val dZone = doc.getString("zone")?.trim()?.uppercase() ?: ""
+
+        val dCompCanon = CompanyDataHelper.getCanonicalDocId(dComp).uppercase()
+        val dZoneCanon = CompanyDataHelper.getCanonicalDocId(dZone).uppercase()
+
+        val normComp = dComp.replace("-", "").replace("_", "").replace(" ", "")
+        val normZone = dZone.replace("-", "").replace("_", "").replace(" ", "")
+
+        // 1. Direct match on companyId or zone or normalized companyId
+        if (dComp == cleanActive || dZone == cleanActive) return true
+        if (normComp.isNotBlank() && normComp == normActive) return true
+        if (normZone.isNotBlank() && normZone == normActive) return true
+
+        // 2. Canonical city name match (e.g. RENALA == RENALA, OKARA == OKARA)
+        if (canonicalActive.isNotBlank() && (dCompCanon == canonicalActive || dZoneCanon == canonicalActive)) return true
+
+        // 3. Prefix match (e.g. REN == REN, OKA == OKA, VEH == VEH)
+        if (prefixActive.length >= 3 && prefixActive.all { it.isLetter() }) {
+            if (normComp.startsWith(prefixActive) || normZone.startsWith(prefixActive)) return true
+        }
+
+        // 4. Substring / contains match for double zones or code zones (e.g. OKA-001 matches OKARA or OKA)
+        if (cleanActive.contains(dZone) || dZone.contains(cleanActive) || cleanActive.contains(dComp) || dComp.contains(cleanActive)) return true
+        if (canonicalActive.isNotBlank() && (dComp.contains(canonicalActive) || dZone.contains(canonicalActive))) return true
+
+        return CompanyDataHelper.belongsToCurrentCompany(context, doc)
     }
 
     private fun renderDealers(query: com.google.firebase.firestore.QuerySnapshot) {
         dealerList.removeAllViews()
-        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
-        val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
 
         val validDocs = query.documents.filter { doc ->
-            val dComp = doc.getString("companyId") ?: doc.getString("company") ?: ""
-            val dZone = doc.getString("zone") ?: ""
-            dComp.equals(currentComp, true) || dZone.equals(canonicalZone, true) || dZone.equals(currentComp, true)
+            isMatchingCompanyOrZone(this, doc)
         }
 
-        dealerCount = validDocs.size
+        val cleanSearch = dealerSearchQuery.trim().lowercase(Locale.getDefault())
+
+        // Group documents by dealer name so same dealer name ALWAYS shows as ONE single consolidated card
+        val groupedDealers = validDocs.groupBy { doc ->
+            (doc.getString("name") ?: doc.getString("dealerName") ?: doc.id).trim().lowercase(Locale.getDefault())
+        }.filter { (cleanName, _) ->
+            cleanSearch.isEmpty() || cleanName.contains(cleanSearch)
+        }
+
+        dealerCount = groupedDealers.size
         totalBalance = 0.0
 
-        if (validDocs.isEmpty()) {
+        if (groupedDealers.isEmpty()) {
             dealerList.addView(emptyState("No dealers yet — tap + to add one"))
-        }
+        } else {
+            var index = 1
+            groupedDealers.forEach { (_, docsInGroup) ->
+                val primaryDoc = docsInGroup.first()
+                val name = primaryDoc.getString("name") ?: primaryDoc.getString("dealerName") ?: primaryDoc.id
+                val primaryId = primaryDoc.id
 
-        var index = 1
-        validDocs.forEach { document ->
-            val name = document.getString("name") ?: ""
-            if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {
-                return@forEach
-            }
+                var ebone = 0.0
+                var wateen = 0.0
+                var zong = 0.0
+                var jazz = 0.0
+                var eboneId = ""
+                var wateenId = ""
+                var zongId = ""
+                var jazzId = ""
+                var mobile = ""
+                var dealerCode = ""
+                var status = "ACTIVE"
+                var zone = "Okara"
 
-            val wateen = document.getDouble("wateenBalance") ?: 0.0
-            val ebone = document.getDouble("eboneBalance") ?: 0.0
-            val zong = document.getDouble("zongBalance") ?: 0.0
-            val combined = wateen + ebone + zong
-            totalBalance += combined
-            dealerNameCache[document.id] = name.ifBlank { document.id }
+                docsInGroup.forEach { doc ->
+                    ebone += doc.getDouble("eboneBalance") ?: 0.0
+                    wateen += doc.getDouble("wateenBalance") ?: 0.0
+                    zong += doc.getDouble("zongBalance") ?: 0.0
+                    jazz += doc.getDouble("jazzBalance") ?: 0.0
 
-            // Filtering Logic for Cards
-            when (activeStatFilter) {
-                "DEALERS" -> { /* show all */ }
-                "PENDING" -> {
-                    if (!dealersWithPending.contains(document.id)) return@forEach
+                    if (eboneId.isBlank()) eboneId = doc.getString("eboneDealerId") ?: ""
+                    if (wateenId.isBlank()) wateenId = doc.getString("wateenDealerId") ?: ""
+                    if (zongId.isBlank()) zongId = doc.getString("zongDealerId") ?: ""
+                    if (jazzId.isBlank()) jazzId = doc.getString("jazzDealerId") ?: ""
+                    if (mobile.isBlank()) mobile = doc.getString("mobile") ?: ""
+                    if (dealerCode.isBlank()) dealerCode = doc.getString("dealerCode") ?: ""
+                    if (doc.getString("status") == "ACTIVE") status = "ACTIVE"
+                    val docZone = doc.getString("zone")?.takeIf { it.isNotBlank() }
+                    if (docZone != null) zone = docZone
                 }
-                "TOTAL" -> {
-                    if (combined <= 0) return@forEach
-                }
-            }
 
-            dealerList.addView(dealerCard(document.id, document, index++))
+                val combined = ebone + wateen + zong + jazz
+                totalBalance += combined
+                dealerNameCache[primaryId] = name.ifBlank { primaryId }
+
+                dealerList.addView(dealerCardMerged(primaryId, docsInGroup, index++, name, mobile, dealerCode, zone, status, ebone, wateen, zong, jazz, eboneId, wateenId, zongId, jazzId))
+            }
         }
 
         statDealersText.text = dealerCount.toString()
+        statPendingText.text = currentPendingCount.toString()
         statBalanceText.text = "Rs. ${"%.0f".format(totalBalance)}"
     }
 
-    private fun dealerCard(dealerId: String, document: DocumentSnapshot, index: Int): LinearLayout {
-        val name = document.getString("name") ?: ""
-        val wateen = document.getDouble("wateenBalance") ?: 0.0
-        val ebone = document.getDouble("eboneBalance") ?: 0.0
-        val zong = document.getDouble("zongBalance") ?: 0.0
-        val isActive = (document.getString("status") ?: "ACTIVE") == "ACTIVE"
-        val zone = document.getString("zone")?.takeIf { it.isNotBlank() } ?: "Okara"
+    private fun dealerCardMerged(
+        primaryId: String,
+        docsInGroup: List<DocumentSnapshot>,
+        index: Int,
+        name: String,
+        mobile: String,
+        dealerCode: String,
+        zone: String,
+        status: String,
+        ebone: Double,
+        wateen: Double,
+        zong: Double,
+        jazz: Double,
+        eboneId: String,
+        wateenId: String,
+        zongId: String,
+        jazzId: String
+    ): View {
+        val isActive = status == "ACTIVE"
+
+        val cardScrollView = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            isSmoothScrollingEnabled = true
+            overScrollMode = View.OVER_SCROLL_NEVER
+            layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(10) }
+        }
+
+        val rowLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = ViewGroup.LayoutParams(-2, -2)
+        }
+
+        val screenWidth = resources.displayMetrics.widthPixels - dp(32)
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -485,15 +603,39 @@ class DealerPanelActivity : AppCompatActivity() {
                 cornerRadius = dp(14).toFloat()
                 setStroke(dp(1), borderLight)
             }
-            elevation = dp(1).toFloat()
-            layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(10) }
+            elevation = dp(2).toFloat()
+            layoutParams = LinearLayout.LayoutParams(screenWidth, -2)
             isClickable = true
-            setOnClickListener { showDealerLedger(dealerId, name, zone) }
+            setOnClickListener { showDealerLedger(primaryId, name, zone) }
+        }
+
+        // Back Delete Action View
+        val deleteActionView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), 0, dp(16), 0)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#DC2626"))
+                cornerRadius = dp(14).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(100), -1).also { it.marginStart = dp(8) }
+
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = "🗑️\nDelete"
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setTypeface(null, Typeface.BOLD)
+            })
+            setOnClickListener {
+                docsInGroup.forEach { doc ->
+                    showDeleteDealerConfirmDialog(doc.id, name, zone)
+                }
+            }
         }
 
         val topRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         
-        // Numbering
         topRow.addView(TextView(this).apply {
             text = "$index."
             textSize = 14f
@@ -516,13 +658,13 @@ class DealerPanelActivity : AppCompatActivity() {
                 setTextColor(textDark)
             })
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "Code ${document.getString("dealerCode") ?: ""}  •  ${document.getString("mobile") ?: ""}"
+                text = "Code ${dealerCode}  •  ${mobile}"
                 textSize = 12f
                 setTextColor(textMuted)
             })
         })
         
-        val zoneColor = if (zone == "Okara") navyMid else purple
+        val zoneColor = if (zone.equals("Okara", true) || zone.contains("OKA", true)) navyMid else purple
         topRow.addView(TextView(this).apply {
             text = zone
             textSize = 10f
@@ -536,12 +678,29 @@ class DealerPanelActivity : AppCompatActivity() {
         val badgeRow = LinearLayout(this).apply {
             setPadding(0, dp(10), 0, 0)
         }
-        badgeRow.addView(networkBalanceBadge("Wateen", wateen, navyMid))
-        badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
-        badgeRow.addView(networkBalanceBadge("Ebone", ebone, orange))
-        badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
-        badgeRow.addView(networkBalanceBadge("Zong", zong, purple))
-        card.addView(badgeRow)
+        var addedAny = false
+        if (eboneId.isNotBlank() || ebone != 0.0) {
+            badgeRow.addView(networkBalanceBadge("Ebone", ebone, orange))
+            addedAny = true
+        }
+        if (wateenId.isNotBlank() || wateen != 0.0) {
+            if (addedAny) badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            badgeRow.addView(networkBalanceBadge("Wateen", wateen, navyMid))
+            addedAny = true
+        }
+        if (zongId.isNotBlank() || zong != 0.0) {
+            if (addedAny) badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            badgeRow.addView(networkBalanceBadge("Zong", zong, purple))
+            addedAny = true
+        }
+        if (jazzId.isNotBlank() || jazz != 0.0) {
+            if (addedAny) badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            badgeRow.addView(networkBalanceBadge("Jazz", jazz, Color.parseColor("#E11D48")))
+            addedAny = true
+        }
+        if (addedAny) {
+            card.addView(badgeRow)
+        }
 
         // Reset Button at bottom of card
         val actionRow = LinearLayout(this).apply {
@@ -553,13 +712,49 @@ class DealerPanelActivity : AppCompatActivity() {
             textSize = 11f
             setTextColor(Color.parseColor("#C62828"))
             setTypeface(null, Typeface.BOLD)
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            background = outlinedPill(Color.parseColor("#FEF2F2"), Color.parseColor("#FEE2E2"), 8)
-            setOnClickListener { resetDealerBalance(dealerId, name, zone) }
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            background = outlinedPill(Color.WHITE, Color.parseColor("#C62828"), 8)
+            setOnClickListener { 
+                docsInGroup.forEach { doc ->
+                    resetDealerBalance(doc.id, name, zone) 
+                }
+            }
         })
         card.addView(actionRow)
 
-        return card
+        rowLayout.addView(card)
+        rowLayout.addView(deleteActionView)
+        cardScrollView.addView(rowLayout)
+
+        return cardScrollView
+    }
+
+    private fun showDeleteDealerConfirmDialog(dealerId: String, name: String, zone: String) {
+        val input = EditText(this).apply {
+            hint = "Enter Security PIN (1234 or 1912)"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Delete Dealer: $name")
+            .setMessage("Are you sure you want to delete dealer '$name' ($zone)? Enter PIN (1234 or 1912) to confirm:")
+            .setView(input)
+            .setPositiveButton("Delete") { _, _ ->
+                val pin = input.text.toString().trim()
+                if (pin == "1234" || pin == "1912") {
+                    db.collection("dealers").document(dealerId).delete().addOnSuccessListener {
+                        FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                            .getReference("dealers").child(dealerId).removeValue()
+                        Toast.makeText(this, "Dealer '$name' deleted successfully", Toast.LENGTH_SHORT).show()
+                        dealerSearchQuery = ""
+                        activeStatFilter = "DEALERS"
+                        observeDealers()
+                    }
+                } else {
+                    Toast.makeText(this, "Incorrect PIN. Deletion cancelled.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun networkBalanceBadge(label: String, amount: Double, accent: Int): LinearLayout =
@@ -605,11 +800,6 @@ class DealerPanelActivity : AppCompatActivity() {
                 dealersWithPending.clear()
                 relevantDocs.forEach { doc ->
                     doc.getString("dealerId")?.let { dealersWithPending.add(it) }
-                }
-                
-                // If the stat filter is PENDING, we need to refresh the dealer list too
-                if (activeStatFilter == "PENDING" || activeStatFilter == "TOTAL" || activeStatFilter == null) {
-                    observeDealers() 
                 }
 
                 if (relevantDocs.isEmpty()) {
@@ -1006,38 +1196,8 @@ class DealerPanelActivity : AppCompatActivity() {
     // ===================== ACTIONS =====================
 
     private fun inspectEbonePanel() {
-        val docRef = getFranchiseDocRef()
-        docRef.get().addOnSuccessListener { snapshot ->
-            val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
-            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
-            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
-            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
-            val jazzEnabled = (enabledMap?.get("JAZZ") as? Boolean) ?: false
-
-            val availablePanels = mutableListOf<Pair<String, String>>()
-            if (eboneEnabled) availablePanels.add("Ebone" to "EBONE")
-            if (wateenEnabled) availablePanels.add("Wateen" to "WATEEN")
-            if (zongEnabled) availablePanels.add("Zong" to "ZONG")
-            if (jazzEnabled) availablePanels.add("Jazz" to "JAZZ")
-
-            if (availablePanels.isEmpty()) {
-                Toast.makeText(this, "No ISP panels enabled for this franchise in City & Franchise Management", Toast.LENGTH_LONG).show()
-                return@addOnSuccessListener
-            }
-
-            val labels = availablePanels.map { it.first }.toTypedArray()
-            AlertDialog.Builder(this)
-                .setTitle("Inspect which panel?")
-                .setItems(labels) { _, which ->
-                    val selectedIsp = availablePanels[which].second
-                    val intent = Intent(this, WebViewLoginActivity::class.java).apply {
-                        putExtra("selected_isp", selectedIsp)
-                        putExtra("debug_tap_inspector", true)
-                    }
-                    startActivity(intent)
-                }
-                .show()
-        }
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "Okara"
+        inspectorAuthManager.inspect(this, getFranchiseDocRef(), currentComp)
     }
 
     private fun fetchWateenDealerId(targetInput: EditText, dealerName: String) {
@@ -1052,6 +1212,10 @@ class DealerPanelActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "Okara"
+        if (inspectorAuthManager.handleActivityResult(requestCode, this, getFranchiseDocRef(), currentComp)) {
+            return
+        }
         if (requestCode == REQUEST_FETCH_DEALER_ID && resultCode == RESULT_OK) {
             val fetchedId = data?.getStringExtra("fetched_dealer_id")
             if (!fetchedId.isNullOrBlank()) {
@@ -1174,6 +1338,9 @@ class DealerPanelActivity : AppCompatActivity() {
         manager.notify(notificationId, notification)
     }
 
+    private var currentWatchdogRunnable: Runnable? = null
+    private var currentUpdateHandler: Handler? = null
+
     private fun startAutoUpdate() {
         if (isAutoUpdating) return
         val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKARA"
@@ -1182,14 +1349,16 @@ class DealerPanelActivity : AppCompatActivity() {
         val docRef = getFranchiseDocRef()
         docRef.get().addOnSuccessListener { snapshot ->
             val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
-            val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
-            val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
-            val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
-
             autoUpdateQueue.clear()
-            if (wateenEnabled) autoUpdateQueue.add("WATEEN" to canonicalZone)
-            if (eboneEnabled) autoUpdateQueue.add("EBONE" to canonicalZone)
-            if (zongEnabled) autoUpdateQueue.add("ZONG" to canonicalZone)
+
+            // Strict chip order matching ALL_COMPANIES: EBONE -> WATEEN -> ZONG -> JAZZ
+            val companyOrder = listOf("EBONE", "WATEEN", "ZONG", "JAZZ")
+            companyOrder.forEach { ispKey ->
+                val isEnabled = (enabledMap?.get(ispKey) as? Boolean) ?: false
+                if (isEnabled) {
+                    autoUpdateQueue.add(ispKey to canonicalZone)
+                }
+            }
 
             if (autoUpdateQueue.isEmpty()) {
                 Toast.makeText(this, "No ISP panels enabled for auto update in $canonicalZone", Toast.LENGTH_SHORT).show()
@@ -1199,57 +1368,73 @@ class DealerPanelActivity : AppCompatActivity() {
             isAutoUpdating = true
             observeFranchiseBalances()
 
-            if (isBackgroundMode) {
-                showStatusNotification("Auto Update Started", "تمام پینلز کا بیلنس بیک گراؤنڈ میں اپ ڈیٹ کیا جا رہا ہے ($canonicalZone)")
-                Toast.makeText(this, "Starting parallel background update for $canonicalZone...", Toast.LENGTH_SHORT).show()
-                val totalPanels = autoUpdateQueue.size
-                var completedPanels = 0
-                val activeList = ArrayList(autoUpdateQueue)
-
-                activeList.forEach { (isp, zone) ->
-                    BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
-                        runOnUiThread {
-                            if (balance != null) {
-                                FranchiseBalanceManager.updateBalance(this, isp, balance, zone) {
-                                    FranchiseBalanceManager.showUpdateNotification(this, isp, balance, zone)
-                                }
-                            } else {
-                                showStatusNotification("$isp Update Failed", "بیلنس چیک کرنے میں دشواری پیش آئی")
-                            }
-                            completedPanels++
-                            if (completedPanels >= totalPanels) {
-                                isAutoUpdating = false
-                                if (::swipeRefreshLayout.isInitialized) {
-                                    swipeRefreshLayout.isRefreshing = false
-                                }
-                                showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
-                                Toast.makeText(this@DealerPanelActivity, "Auto Update completed!", Toast.LENGTH_LONG).show()
-                                observeFranchiseBalances()
-                            }
-                        }
+            // Failsafe watchdog timer (30 seconds max) to prevent getting stuck on "Updating..."
+            val updateHandler = Handler(Looper.getMainLooper())
+            val watchdogRunnable = Runnable {
+                if (isAutoUpdating) {
+                    isAutoUpdating = false
+                    if (::swipeRefreshLayout.isInitialized) {
+                        swipeRefreshLayout.isRefreshing = false
                     }
+                    observeFranchiseBalances()
+                    Toast.makeText(this@DealerPanelActivity, "Auto Update finished.", Toast.LENGTH_SHORT).show()
                 }
-                return@addOnSuccessListener
             }
+            updateHandler.postDelayed(watchdogRunnable, 30000L)
+            currentWatchdogRunnable = watchdogRunnable
+            currentUpdateHandler = updateHandler
 
-            Toast.makeText(this, "Starting Auto Update for $canonicalZone...", Toast.LENGTH_SHORT).show()
+            showStatusNotification("Auto Update Started", "ترتیب وار تمام پینلز کا بیلنس اپ ڈیٹ کیا جا رہا ہے ($canonicalZone)")
+            Toast.makeText(this, "Starting sequential update for $canonicalZone...", Toast.LENGTH_SHORT).show()
             processNextAutoUpdate()
         }
     }
 
     private fun processNextAutoUpdate() {
         if (autoUpdateQueue.isEmpty()) {
+            currentWatchdogRunnable?.let { currentUpdateHandler?.removeCallbacks(it) }
             isAutoUpdating = false
             observeFranchiseBalances()
             if (::swipeRefreshLayout.isInitialized) {
                 swipeRefreshLayout.isRefreshing = false
             }
-            if (isBackgroundMode) showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
+            showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
             Toast.makeText(this, "Auto Update completed!", Toast.LENGTH_LONG).show()
             return
         }
         val next = autoUpdateQueue.removeAt(0)
-        launchCheckBalance(next.first, next.second)
+        val isp = next.first
+        val zone = next.second
+
+        showStatusNotification("Checking $isp Balance...", "$zone پینل سے بیلنس پڑھا جا رہا ہے")
+        BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
+            runOnUiThread {
+                if (balance != null) {
+                    FranchiseBalanceManager.updateBalance(this, isp, balance, zone) {
+                        FranchiseBalanceManager.showUpdateNotification(this, isp, balance, zone)
+                    }
+                } else {
+                    showStatusNotification("$isp Update Failed", "بیلنس چیک کرنے میں دشواری پیش آئی")
+                }
+
+                if (autoUpdateQueue.isEmpty()) {
+                    // Last panel just completed — show completion notification INSTANTLY!
+                    currentWatchdogRunnable?.let { currentUpdateHandler?.removeCallbacks(it) }
+                    isAutoUpdating = false
+                    observeFranchiseBalances()
+                    if (::swipeRefreshLayout.isInitialized) {
+                        swipeRefreshLayout.isRefreshing = false
+                    }
+                    showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
+                    Toast.makeText(this@DealerPanelActivity, "Auto Update completed!", Toast.LENGTH_LONG).show()
+                } else {
+                    // More panels remaining, wait 500ms and process next
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        processNextAutoUpdate()
+                    }, 500L)
+                }
+            }
+        }
     }
 
     private fun getFranchiseDocRef(): DocumentReference {
@@ -1293,9 +1478,6 @@ class DealerPanelActivity : AppCompatActivity() {
 
     private fun processBalanceSnapshot(snapshot: DocumentSnapshot) {
         val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
-        val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
-        val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
-        val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
 
         val enabledFeatures = snapshot.get("enabledFeatures") as? Map<*, *>
         val dealerWebviewEnabled = if (enabledFeatures != null) {
@@ -1314,19 +1496,24 @@ class DealerPanelActivity : AppCompatActivity() {
         val ebone = snapshot.getDouble("eboneBalance")
         val wateen = snapshot.getDouble("wateenBalance")
         val zong = snapshot.getDouble("zongBalance")
+        val jazz = snapshot.getDouble("jazzBalance")
         
         val eboneTh = snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0
         val wateenTh = snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0
         val zongTh = snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0
+        val jazzTh = snapshot.getDouble("jazzLowBalanceThreshold") ?: 0.0
 
-        if (wateenEnabled) {
-            franchiseBalancesRow.addView(franchiseBalanceChip("Wateen", wateen, navyMid, "WATEEN", cityName, wateenTh))
-        }
-        if (eboneEnabled) {
-            franchiseBalancesRow.addView(franchiseBalanceChip("Ebone", ebone, orange, "EBONE", cityName, eboneTh))
-        }
-        if (zongEnabled) {
-            franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zong, purple, "ZONG", cityName, zongTh))
+        val companyOrder = listOf("EBONE", "WATEEN", "ZONG", "JAZZ")
+        companyOrder.forEach { ispKey ->
+            val isEnabled = (enabledMap?.get(ispKey) as? Boolean) ?: false
+            if (isEnabled) {
+                when (ispKey) {
+                    "EBONE" -> franchiseBalancesRow.addView(franchiseBalanceChip("Ebone", ebone, orange, "EBONE", cityName, eboneTh))
+                    "WATEEN" -> franchiseBalancesRow.addView(franchiseBalanceChip("Wateen", wateen, navyMid, "WATEEN", cityName, wateenTh))
+                    "ZONG" -> franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zong, purple, "ZONG", cityName, zongTh))
+                    "JAZZ" -> franchiseBalancesRow.addView(franchiseBalanceChip("Jazz", jazz, Color.parseColor("#E11D48"), "JAZZ", cityName, jazzTh))
+                }
+            }
         }
         franchiseBalancesRow.addView(autoUpdateChip())
         if (dealerWebviewEnabled) {
@@ -1441,6 +1628,7 @@ class DealerPanelActivity : AppCompatActivity() {
             val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
             val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
             val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+            val jazzEnabled = (enabledMap?.get("JAZZ") as? Boolean) ?: false
 
             val cityName = snapshot.getString("cityName")?.trim()?.takeIf { it.isNotBlank() } ?: CompanyDataHelper.getCurrentCompanyId(this) ?: "Franchise"
 
@@ -1458,6 +1646,7 @@ class DealerPanelActivity : AppCompatActivity() {
             var eboneInput: EditText? = null
             var wateenInput: EditText? = null
             var zongInput: EditText? = null
+            var jazzInput: EditText? = null
 
             if (eboneEnabled) {
                 eboneInput = EditText(this).apply {
@@ -1483,6 +1672,14 @@ class DealerPanelActivity : AppCompatActivity() {
                 }
                 box.addView(zongInput)
             }
+            if (jazzEnabled) {
+                jazzInput = EditText(this).apply {
+                    hint = "Jazz alert limit (Rs.)"
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText((snapshot.getDouble("jazzLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
+                }
+                box.addView(jazzInput)
+            }
 
             AlertDialog.Builder(this)
                 .setTitle("Low Balance Alerts ($cityName)")
@@ -1497,6 +1694,9 @@ class DealerPanelActivity : AppCompatActivity() {
                     }
                     if (zongEnabled && zongInput != null) {
                         updates["zongLowBalanceThreshold"] = zongInput.text.toString().trim().toDoubleOrNull() ?: 0.0
+                    }
+                    if (jazzEnabled && jazzInput != null) {
+                        updates["jazzLowBalanceThreshold"] = jazzInput.text.toString().trim().toDoubleOrNull() ?: 0.0
                     }
                     if (updates.isNotEmpty()) {
                         docRef.set(updates, SetOptions.merge())
@@ -1579,6 +1779,7 @@ class DealerPanelActivity : AppCompatActivity() {
         val eboneIdInput = EditText(this).apply { hint = "Ebone Panel Dealer ID" }
         val wateenIdInput = EditText(this).apply { hint = "Wateen Panel Dealer ID" }
         val zongIdInput = EditText(this).apply { hint = "Zong Panel Dealer ID" }
+        val jazzIdInput = EditText(this).apply { hint = "Jazz Panel Dealer ID" }
         val code = (100000..999999).random().toString()
 
         val docRef = getFranchiseDocRef()
@@ -1587,6 +1788,7 @@ class DealerPanelActivity : AppCompatActivity() {
             val eboneEnabled = (enabledMap?.get("EBONE") as? Boolean) ?: false
             val wateenEnabled = (enabledMap?.get("WATEEN") as? Boolean) ?: false
             val zongEnabled = (enabledMap?.get("ZONG") as? Boolean) ?: false
+            val jazzEnabled = (enabledMap?.get("JAZZ") as? Boolean) ?: false
 
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1613,32 +1815,80 @@ class DealerPanelActivity : AppCompatActivity() {
                     })
                 }
                 if (zongEnabled) addView(zongIdInput)
+                if (jazzEnabled) addView(jazzIdInput)
                 addView(TextView(this@DealerPanelActivity).apply { text = "Code: $code"; textSize = 16f; setPadding(0, dp(14), 0, 0) })
             }
 
-            AlertDialog.Builder(this).setTitle("Add Dealer ($canonicalZone)").setView(box).setPositiveButton("Create") { _, _ ->
+            AlertDialog.Builder(this).setTitle("Add / Update Dealer ($canonicalZone)").setView(box).setPositiveButton("Save") { _, _ ->
                 val name = nameInput.text.toString().trim()
                 val mobile = mobileInput.text.toString().trim()
-                if (name.isEmpty() || mobile.isEmpty()) {
-                    Toast.makeText(this, "Dealer name and mobile are required", Toast.LENGTH_SHORT).show()
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "Dealer name is required", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                val dealerId = db.collection("dealers").document().id
-                val dealer = mapOf(
-                    "dealerId" to dealerId,
-                    "name" to name,
-                    "mobile" to mobile,
-                    "dealerCode" to code,
-                    "zone" to canonicalZone,
-                    "companyId" to currentComp,
-                    "eboneDealerId" to if (eboneEnabled) eboneIdInput.text.toString().trim() else "",
-                    "wateenDealerId" to if (wateenEnabled) wateenIdInput.text.toString().trim() else "",
-                    "zongDealerId" to if (zongEnabled) zongIdInput.text.toString().trim() else "",
-                    "createdAt" to System.currentTimeMillis()
-                )
-                db.collection("dealers").document(dealerId).set(dealer).addOnSuccessListener {
-                    Toast.makeText(this, "Dealer '$name' created for $canonicalZone", Toast.LENGTH_SHORT).show()
-                }
+
+                val eboneIdVal = if (eboneEnabled) eboneIdInput.text.toString().trim() else ""
+                val wateenIdVal = if (wateenEnabled) wateenIdInput.text.toString().trim() else ""
+                val zongIdVal = if (zongEnabled) zongIdInput.text.toString().trim() else ""
+                val jazzIdVal = if (jazzEnabled) jazzIdInput.text.toString().trim() else ""
+
+                // Check if a dealer with this name already exists in this zone to prevent duplicate cards
+                db.collection("dealers")
+                    .whereEqualTo("zone", canonicalZone)
+                    .get()
+                    .addOnSuccessListener { existingSnap ->
+                        val existingDoc = existingSnap.documents.firstOrNull { doc ->
+                            val existingName = doc.getString("name") ?: ""
+                            existingName.equals(name, ignoreCase = true)
+                        }
+
+                        if (existingDoc != null) {
+                            // Merge/update into the existing dealer card!
+                            val updateMap = mutableMapOf<String, Any>()
+                            if (mobile.isNotBlank()) updateMap["mobile"] = mobile
+                            if (eboneIdVal.isNotBlank()) updateMap["eboneDealerId"] = eboneIdVal
+                            if (wateenIdVal.isNotBlank()) updateMap["wateenDealerId"] = wateenIdVal
+                            if (zongIdVal.isNotBlank()) updateMap["zongDealerId"] = zongIdVal
+                            if (jazzIdVal.isNotBlank()) updateMap["jazzDealerId"] = jazzIdVal
+
+                            existingDoc.reference.update(updateMap).addOnSuccessListener {
+                                FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                                    .getReference("dealers")
+                                    .child(existingDoc.id)
+                                    .updateChildren(updateMap)
+                                Toast.makeText(this, "Updated '$name' on existing card ($canonicalZone)", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            // Create new single dealer document
+                            val dealerId = db.collection("dealers").document().id
+                            val dealer = mapOf(
+                                "dealerId" to dealerId,
+                                "name" to name,
+                                "mobile" to mobile,
+                                "dealerCode" to code,
+                                "zone" to canonicalZone,
+                                "companyId" to currentComp,
+                                "company" to currentComp,
+                                "companyCode" to currentComp,
+                                "eboneDealerId" to eboneIdVal,
+                                "wateenDealerId" to wateenIdVal,
+                                "zongDealerId" to zongIdVal,
+                                "jazzDealerId" to jazzIdVal,
+                                "eboneBalance" to 0.0,
+                                "wateenBalance" to 0.0,
+                                "zongBalance" to 0.0,
+                                "jazzBalance" to 0.0,
+                                "createdAt" to System.currentTimeMillis()
+                            )
+                            db.collection("dealers").document(dealerId).set(dealer).addOnSuccessListener {
+                                FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                                    .getReference("dealers")
+                                    .child(dealerId)
+                                    .setValue(dealer)
+                                Toast.makeText(this, "Dealer '$name' created for $canonicalZone", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
             }.setNegativeButton("Cancel", null).show()
         }
     }

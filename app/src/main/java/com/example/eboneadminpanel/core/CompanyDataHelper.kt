@@ -167,6 +167,7 @@ object CompanyDataHelper {
             ?: doc.getString("companyName")
             ?: doc.getString("companyCode")
             ?: doc.getString("zone")
+            ?: doc.id
         return matchesCompany(context, itemCompanyId)
     }
 
@@ -174,6 +175,7 @@ object CompanyDataHelper {
         val clean = input.trim().uppercase()
 
         return when {
+            clean.contains("HAV") -> "HAVELI"
             clean.contains("REN") -> "RENALA"
             clean.contains("DEP") -> "DEPALPUR"
             clean.contains("OKA") -> "OKARA"
@@ -183,7 +185,16 @@ object CompanyDataHelper {
             clean.contains("GOJ") -> "GOJRA"
             clean.contains("HUJ") -> "HUJRA"
             clean.contains("PAT") -> "PATTOKI"
-            else -> clean
+            clean.contains("FSD") -> "FAISALABAD"
+            clean.contains("LHR") -> "LAHORE"
+            clean.contains("VEH") -> "VEHARI"
+            clean.contains("MUL") -> "MULTAN"
+            clean.contains("SKP") -> "SHEIKHUPURA"
+            clean.contains("GRW") -> "GUJRANWALA"
+            clean.contains("SGG") -> "SARGODHA"
+            clean.contains("RYK") -> "RAHIM YAR KHAN"
+            clean.contains("KAS") -> "KASUR"
+            else -> clean.replace("-", "").replace("_", "").replace(" ", "")
         }
     }
 

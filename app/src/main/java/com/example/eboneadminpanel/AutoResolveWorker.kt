@@ -163,7 +163,7 @@ class AutoResolveWorker(context: Context, params: WorkerParameters) : CoroutineW
         handler.postDelayed(timeoutRunnable, 45000)
 
         val (username, password) = when {
-            isp.startsWith("EBONE") -> Pair(IspPanelSettingsActivity.getDealerUsername(applicationContext, "EBONE", zone, "Akmal"), IspPanelSettingsActivity.getDealerPassword(applicationContext, "EBONE", zone, "Akmal"))
+            isp.startsWith("EBONE") -> Pair(IspPanelSettingsActivity.getDealerUsername(applicationContext, "EBONE", zone, "FastNet"), IspPanelSettingsActivity.getDealerPassword(applicationContext, "EBONE", zone, "FastNet"))
             isp.startsWith("WATEEN") -> Pair(IspPanelSettingsActivity.getSavedUsername(applicationContext, "WATEEN", zone), IspPanelSettingsActivity.getSavedPassword(applicationContext, "WATEEN", zone))
             isp.startsWith("ZONG") -> Pair(IspPanelSettingsActivity.getSavedUsername(applicationContext, "ZONG", zone), IspPanelSettingsActivity.getSavedPassword(applicationContext, "ZONG", zone))
             else -> Pair(null, null)

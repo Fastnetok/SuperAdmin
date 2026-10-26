@@ -29,6 +29,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.firestore.FirebaseFirestore
 import org.json.JSONObject
 
@@ -176,7 +177,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         Log.d("ZongRenalaWebView", "Zong Renala → Login Started → Renala URL ($LOGIN_URL) → User: $username")
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
-            Log.d("ZongRenalaWebView", "Zong Renala → Account credentials missing, loading login page")
+            Log.d("ZongRenalaWebView", "Zong Renala → Account credentials missing or paused, loading login page")
             webView.loadUrl(LOGIN_URL)
             return
         }
@@ -213,6 +214,22 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         }
     }
 
+    private fun showInvalidCredentialsPopup(isp: String, zone: String) {
+        AlertDialog.Builder(this)
+            .setTitle("⚠️ $isp Login Failed ($zone)")
+            .setMessage("Invalid username or password detected. Please verify your login credentials in ISP Panel Settings.")
+            .setPositiveButton("Open ISP Settings") { _, _ ->
+                startActivity(Intent(this, IspPanelSettingsActivity::class.java))
+                finish()
+            }
+            .setNegativeButton("Close") { dialog, _ ->
+                dialog.dismiss()
+                finish()
+            }
+            .setCancelable(false)
+            .show()
+    }
+
     private fun handlePage(url: String) {
         when {
             url.contains("login.php", ignoreCase = true) -> {
@@ -222,7 +239,13 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                 loginAttemptInProgress = false
                 dealerTopupStep = 0
                 balanceCheckAttempted = false
-                if (!loginAttemptInProgress) tryLogin()
+                webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText : ''; })()") { bodyText ->
+                    if (bodyText != null && (bodyText.contains("Invalid username or password", ignoreCase = true) || bodyText.contains("Incorrect", ignoreCase = true) || bodyText.contains("login_error", ignoreCase = true))) {
+                        showInvalidCredentialsPopup("ZONG", ZONE)
+                    } else if (!loginAttemptInProgress) {
+                        tryLogin()
+                    }
+                }
             }
 
             url.contains("turbonet.zong.com.pk", ignoreCase = true) && !url.contains("login.php", ignoreCase = true) -> {
@@ -485,7 +508,36 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             val dealerBalance = Regex("\\\"dealerBalance\\\":\\\"(.*?)\\\"").find(clean)?.groupValues?.getOrNull(1) ?: ""
             val amount = topupAmount?.toDoubleOrNull() ?: 0.0
 
-            db.collection("dealerPayments").add(mapOf("dealerId" to (dealerInternalId ?: ""), "dealerName" to (dealerDisplayName ?: ""), "panel" to "ZONG", "zone" to ZONE, "ispDealerId" to (dealerEboneId ?: ""), "amount" to amount, "submittedAt" to System.currentTimeMillis(), "resultText" to clean.take(500), "dealerBalanceAfter" to dealerBalance, "sourceTransactionId" to (sourceTransactionId ?: "")))
+            val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "REN-001"
+            val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
+            val logEntry = mapOf(
+                "dealerId" to (dealerInternalId ?: ""), 
+                "dealerName" to (dealerDisplayName ?: ""), 
+                "panel" to "ZONG", 
+                "zone" to canonicalZone, 
+                "companyId" to currentComp,
+                "company" to currentComp,
+                "ispDealerId" to (dealerEboneId ?: ""), 
+                "amount" to amount, 
+                "submittedAt" to System.currentTimeMillis(), 
+                "createdAt" to System.currentTimeMillis(),
+                "resultText" to clean.take(500), 
+                "dealerBalanceAfter" to dealerBalance, 
+                "sourceTransactionId" to (sourceTransactionId ?: "")
+            )
+            db.collection("dealerPayments").add(logEntry)
+
+            if (!dealerInternalId.isNullOrBlank()) {
+                db.collection("dealers").document(dealerInternalId!!)
+                    .update("zongBalance", com.google.firebase.firestore.FieldValue.increment(amount))
+
+                try {
+                    com.google.firebase.database.FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                        .getReference("dealers").child(dealerInternalId!!).child("zongBalance")
+                        .setValue(com.google.firebase.database.ServerValue.increment(amount))
+                } catch (_: Exception) {}
+            }
 
             val transactionId = sourceTransactionId?.trim()?.takeIf { it.isNotBlank() }
             if (transactionId != null) {
@@ -527,26 +579,6 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
     private fun getZongCredentials(zone: String): Pair<String?, String?> {
         val u = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", zone)
         val p = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", zone)
-        if (!u.isNullOrBlank() && !p.isNullOrBlank()) {
-            return u to p
-        }
-
-        try {
-            val raw = securePrefs(ZONG_PREFS).getString(KEY_ACCOUNTS, "") ?: ""
-            val accounts = if (raw.isEmpty()) JSONObject() else JSONObject(raw)
-            val active = securePrefs(ZONG_PREFS).getString(KEY_ACTIVE, "") ?: ""
-            val accountName = if (active.isNotEmpty() && accounts.has(active)) active else if (accounts.keys().hasNext()) accounts.keys().next() else null
-            if (accountName != null) {
-                activeAccountName = accountName
-                val acc = accounts.getJSONObject(accountName)
-                val accUser = acc.optString("username", "")
-                val accPass = acc.optString("password", "")
-                if (accUser.isNotEmpty() && accPass.isNotEmpty()) {
-                    return accUser to accPass
-                }
-            }
-        } catch (_: Exception) {}
-
         return u to p
     }
 

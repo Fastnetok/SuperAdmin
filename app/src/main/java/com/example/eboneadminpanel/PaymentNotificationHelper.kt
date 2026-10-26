@@ -33,7 +33,7 @@ object PaymentNotificationHelper {
     // wrong (Franchise) login instead of Akmal's dealer panel. Same
     // fixed dealer name already used for EBONE relief actions in
     // UnpaidPackageActivationActivity (RELIEF_DEALER_NAME = "Akmal").
-    private const val EBONE_DEALER_NAME = "Akmal"
+    private const val EBONE_DEALER_NAME = "FastNet"
 
     fun showActivationNotification(context: Context, transactionId: String, customerId: String) {
         FirebaseFirestore.getInstance()
@@ -45,15 +45,9 @@ object PaymentNotificationHelper {
                     putExtra("selected_isp", isp)
                     putExtra("auto_activate_customer_id", customerId)
                     putExtra("transaction_id", transactionId)
-                    // Force the correct dealer login for EBONE so this
-                    // customer's ID recharges via Akmal's dealer panel
-                    // instead of the Franchise account. WATEEN/ZONG are
-                    // unchanged — they still use whatever Franchise/
-                    // account is already configured for them in ISP
-                    // Panel Settings.
-                    if (isp.equals("EBONE", ignoreCase = true)) {
-                        putExtra("dealer_account_name", EBONE_DEALER_NAME)
-                    }
+                    // Uses the main FastNet Franchise account configured for
+                    // EBONE in ISP Panel Settings. WATEEN/ZONG use their
+                    // respective Franchise accounts configured in ISP Panel Settings.
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
 

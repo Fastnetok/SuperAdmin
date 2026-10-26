@@ -29,9 +29,10 @@ object StartupSessionManager {
         val db = FirebaseFirestore.getInstance()
         db.collection("franchiseSettings").document(canonicalDocId).get().addOnSuccessListener { snapshot ->
             val enabledCompanies = snapshot.get("enabledCompanies") as? Map<*, *>
-            val eboneEnabled = enabledCompanies?.get("EBONE") as? Boolean ?: true
+            val eboneEnabled = enabledCompanies?.get("EBONE") as? Boolean ?: false
             val wateenEnabled = enabledCompanies?.get("WATEEN") as? Boolean ?: false
             val zongEnabled = enabledCompanies?.get("ZONG") as? Boolean ?: false
+            val jazzEnabled = enabledCompanies?.get("JAZZ") as? Boolean ?: false
 
             val tasks = mutableListOf<Pair<String, String>>()
             if (eboneEnabled) tasks.add("EBONE" to currentCompany)
@@ -42,6 +43,7 @@ object StartupSessionManager {
                     tasks.add("ZONG" to "Renala")
                 }
             }
+            if (jazzEnabled) tasks.add("JAZZ" to currentCompany)
 
             if (tasks.isEmpty()) {
                 Log.d(TAG, "No ISP enabled for company $currentCompany")

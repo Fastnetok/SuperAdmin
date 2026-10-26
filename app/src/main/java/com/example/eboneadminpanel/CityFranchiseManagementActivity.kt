@@ -248,26 +248,21 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
                     spinnerCities.setSelection(cityList.indexOf(capitalized))
                     inputNewCity.text.clear()
 
-                    // Initialize company-wise permissions document in franchiseSettings strictly per-company
+                    // Initialize company-wise permissions document in franchiseSettings strictly per-company (Pending Super Admin Approval)
                     val docId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(capitalized)
                     val companiesMap = AppFeatures.ALL_COMPANIES.associateWith { false }
-                    val featuresMap = AppFeatures.ALL_FEATURES.associateWith { feat ->
-                        val clean = feat.trim().lowercase()
-                        if (clean.contains("movement tracking") || clean.contains("auto complaint") || clean.contains("webview")) {
-                            false
-                        } else {
-                            true
-                        }
-                    }
+                    val featuresMap = AppFeatures.ALL_FEATURES.associateWith { false }
                     val data = mapOf(
                         "enabledCompanies" to companiesMap,
                         "enabledFeatures" to featuresMap,
-                        "cityName" to capitalized
+                        "cityName" to capitalized,
+                        "isApproved" to false,
+                        "approvalStatus" to "PENDING"
                     )
                     db.collection("franchiseSettings").document(docId)
                         .set(data, SetOptions.merge())
                         .addOnSuccessListener {
-                            Toast.makeText(this, "Company-wise settings created for $capitalized", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "Company created for $capitalized (Pending Super Admin Approval)", Toast.LENGTH_LONG).show()
                             loadCityPermissions(capitalized)
                         }
                 } else {

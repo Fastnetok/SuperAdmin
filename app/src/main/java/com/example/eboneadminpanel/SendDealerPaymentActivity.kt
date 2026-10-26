@@ -51,6 +51,7 @@ class SendDealerPaymentActivity : AppCompatActivity() {
     private val companies = mutableListOf("EBONE", "WATEEN", "ZONG")
     private lateinit var companyAdapter: ArrayAdapter<String>
 
+    private var allDealers: List<DocumentSnapshot> = emptyList()
     private var dealers: List<DocumentSnapshot> = emptyList()
     private var selectedDealerIndex = -1
     private var selectedCompanyIndex = 0
@@ -121,16 +122,31 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
         
-        // NEW: Wrench Icon for reports (as requested)
-        headerRow.addView(ImageButton(this).apply {
-            setImageResource(R.drawable.ic_menu_manage)
-            background = null
-            imageTintList = ColorStateList.valueOf(textDark)
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+        // Vibrant, authentic Dealer Reports button (👥 Reports 📊)
+        val reportBtn = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(14), dp(8))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#2563EB"), Color.parseColor("#1D4ED8"))
+            ).apply {
+                cornerRadius = dp(20).toFloat()
+            }
+            elevation = dp(3).toFloat()
+
+            addView(TextView(this@SendDealerPaymentActivity).apply {
+                text = "👥 Reports 📊"
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.WHITE)
+            })
+
             setOnClickListener {
                 startActivity(Intent(this@SendDealerPaymentActivity, DealerRechargeReportActivity::class.java))
             }
-        })
+        }
+        headerRow.addView(reportBtn)
         
         root.addView(headerRow)
 
@@ -164,6 +180,9 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
                     selectedCompanyIndex = pos
+                    if (!isPrefilled) {
+                        updateDealerDropdownForSelectedCompany()
+                    }
                 }
                 override fun onNothingSelected(p: AdapterView<*>?) {}
             }
@@ -227,27 +246,51 @@ class SendDealerPaymentActivity : AppCompatActivity() {
         if (panelIndex >= 0) companySpinner.setSelection(panelIndex)
     }
 
+    private fun updateDealerDropdownForSelectedCompany() {
+        val selectedPanel = companies.getOrNull(selectedCompanyIndex)?.uppercase() ?: "EBONE"
+        val fieldName = when (selectedPanel) {
+            "EBONE" -> "eboneDealerId"
+            "WATEEN" -> "wateenDealerId"
+            "ZONG" -> "zongDealerId"
+            "JAZZ" -> "jazzDealerId"
+            else -> "eboneDealerId"
+        }
+
+        val filteredDealers = allDealers.filter { doc ->
+            val ispId = doc.getString(fieldName)?.trim().orEmpty()
+            ispId.isNotBlank()
+        }
+
+        dealers = filteredDealers
+
+        if (filteredDealers.isEmpty()) {
+            selectedDealerIndex = -1
+            dealerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("No dealers created for $selectedPanel"))
+        } else {
+            val names = filteredDealers.map { doc ->
+                val name = doc.getString("name") ?: doc.id
+                val zone = doc.getString("zone")?.ifBlank { null } ?: "Okara"
+                "$name ($zone)"
+            }
+            dealerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
+            dealerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    selectedDealerIndex = pos
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+            selectedDealerIndex = 0
+            dealerSpinner.setSelection(0)
+        }
+    }
+
     private fun loadDealers() {
         db.collection("dealers").orderBy("name").get()
             .addOnSuccessListener { snapshot ->
-                dealers = snapshot.documents.filter { doc ->
+                allDealers = snapshot.documents.filter { doc ->
                     CompanyDataHelper.belongsToCurrentCompany(this@SendDealerPaymentActivity, doc)
                 }
-                // NEW: show each dealer's zone tag in the dropdown (e.g.
-                // "Sajid (Renala)") so it's never ambiguous which
-                // franchise a manual payment will actually go through.
-                val names = dealers.map { doc ->
-                    val name = doc.getString("name") ?: doc.id
-                    val zone = doc.getString("zone")?.ifBlank { null } ?: "Okara"
-                    "$name ($zone)"
-                }
-                dealerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
-                dealerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                    override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                        selectedDealerIndex = pos
-                    }
-                    override fun onNothingSelected(p: AdapterView<*>?) {}
-                }
+                updateDealerDropdownForSelectedCompany()
 
                 if (isPrefilled) {
                     val idx = dealers.indexOfFirst { it.id == prefillDealerId }

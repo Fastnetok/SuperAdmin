@@ -210,11 +210,62 @@ class CompanyRepository {
     fun cleanOrphanedData() {
         companiesRef.get().addOnSuccessListener { companySnap ->
             val activeCompanyIds = mutableSetOf<String>()
+            val activeCanonicalSet = mutableSetOf<String>()
+
+            // Default valid franchise zones and city codes that must NEVER be deleted
+            val defaultValidZones = setOf(
+                "OKA", "REN", "DEP", "HAV", "PAK", "SAH", "ARI", "GOJ", "HUJ", "PAT", "FSD", "LHR", "VEH", "MUL", "SKP", "GRW", "SGG", "RYK", "KAS",
+                "OKARA", "RENALA", "DEPALPUR", "HAVELI", "PAKPATTAN", "SAHIWAL", "ARIFWALA", "GOJRA", "HUJRA", "PATTOKI", "FAISALABAD", "LAHORE"
+            )
+
             for (doc in companySnap.documents) {
-                activeCompanyIds.add(doc.id.trim().uppercase())
-                doc.getString("companyId")?.let { activeCompanyIds.add(it.trim().uppercase()) }
-                doc.getString("companyCode")?.let { activeCompanyIds.add(it.trim().uppercase()) }
-                doc.getString("companyName")?.let { activeCompanyIds.add(it.trim().uppercase()) }
+                val docId = doc.id.trim().uppercase()
+                if (docId.isNotBlank()) {
+                    activeCompanyIds.add(docId)
+                    CompanyDataHelper.normalizeToCanonical(docId)?.let { activeCanonicalSet.add(it) }
+                    activeCanonicalSet.add(CompanyDataHelper.getCanonicalDocId(docId).uppercase())
+                }
+
+                doc.getString("companyId")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }?.let {
+                    activeCompanyIds.add(it)
+                    CompanyDataHelper.normalizeToCanonical(it)?.let { norm -> activeCanonicalSet.add(norm) }
+                    activeCanonicalSet.add(CompanyDataHelper.getCanonicalDocId(it).uppercase())
+                }
+                doc.getString("companyCode")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }?.let {
+                    activeCompanyIds.add(it)
+                    CompanyDataHelper.normalizeToCanonical(it)?.let { norm -> activeCanonicalSet.add(norm) }
+                    activeCanonicalSet.add(CompanyDataHelper.getCanonicalDocId(it).uppercase())
+                }
+                doc.getString("companyName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }?.let {
+                    activeCompanyIds.add(it)
+                    CompanyDataHelper.normalizeToCanonical(it)?.let { norm -> activeCanonicalSet.add(norm) }
+                    activeCanonicalSet.add(CompanyDataHelper.getCanonicalDocId(it).uppercase())
+                }
+            }
+
+            fun isOrphanedComp(rawComp: String?): Boolean {
+                val clean = rawComp?.trim()?.uppercase() ?: return false
+                if (clean.isBlank()) return false
+
+                // 1. Check default valid franchise zones/cities/prefixes
+                if (defaultValidZones.contains(clean)) return false
+                val cleanCanon = CompanyDataHelper.getCanonicalDocId(clean).uppercase()
+                val cleanNorm = CompanyDataHelper.normalizeToCanonical(clean) ?: ""
+                if (defaultValidZones.contains(cleanCanon) || defaultValidZones.contains(cleanNorm)) return false
+
+                if (defaultValidZones.any { clean.contains(it) || it.contains(clean) }) return false
+
+                // 2. Check active company IDs and canonical sets
+                if (activeCompanyIds.isEmpty()) return false
+
+                if (activeCompanyIds.contains(clean) || activeCanonicalSet.contains(clean)) return false
+                if (cleanNorm.isNotBlank() && activeCanonicalSet.contains(cleanNorm)) return false
+                if (cleanCanon.isNotBlank() && activeCanonicalSet.contains(cleanCanon)) return false
+
+                if (activeCompanyIds.any { clean.contains(it) || it.contains(clean) }) return false
+                if (activeCanonicalSet.any { clean.contains(it) || it.contains(clean) }) return false
+
+                return true
             }
 
             val rtdbRef = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com").getReference()
@@ -227,11 +278,7 @@ class CompanyRepository {
                             ?: child.child("companyName").value?.toString() 
                             ?: child.child("company").value?.toString() ?: ""
                         
-                        val cNorm = compId.trim().uppercase()
-
-                        val isOrphaned = cNorm.isBlank() || (activeCompanyIds.isNotEmpty() && !activeCompanyIds.contains(cNorm) && !activeCompanyIds.any { cNorm.contains(it) })
-
-                        if (isOrphaned) {
+                        if (compId.isNotBlank() && isOrphanedComp(compId)) {
                             child.ref.removeValue()
                         }
                     }
@@ -243,9 +290,12 @@ class CompanyRepository {
                 val batch = firestore.batch()
                 var hasDeletes = false
                 for (doc in dealerSnap.documents) {
-                    val dComp = doc.getString("companyId") ?: doc.getString("company") ?: doc.getString("zone") ?: ""
-                    val dNorm = dComp.trim().uppercase()
-                    if (dNorm.isNotBlank() && activeCompanyIds.isNotEmpty() && !activeCompanyIds.contains(dNorm) && !activeCompanyIds.any { dNorm.contains(it) }) {
+                    val dComp = doc.getString("companyId")
+                        ?: doc.getString("company")
+                        ?: doc.getString("companyCode")
+                        ?: doc.getString("zone")
+                        ?: ""
+                    if (dComp.isNotBlank() && isOrphanedComp(dComp)) {
                         batch.delete(doc.reference)
                         hasDeletes = true
                     }

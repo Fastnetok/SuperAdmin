@@ -29,6 +29,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.superadmin.core.CompanyDataHelper
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -107,14 +108,19 @@ class EboneWebViewActivity : AppCompatActivity() {
         customerUrlOverride = intent.getStringExtra("customer_url")?.trim()?.takeIf { it.isNotBlank() }
         debugTapInspectorEnabled = intent.getBooleanExtra("debug_tap_inspector", false)
 
-        if (manualAction == "DEALER_TOPUP" && forceAccountName.isNullOrBlank()) {
-            forceAccountName = dealerDisplayName?.trim()?.takeIf { it.isNotBlank() }
-        }
-
         webView = findViewById(R.id.loginWebView)
 
-        findViewById<Button>(R.id.accountSwitchButton).setOnClickListener {
-            showAccountListDialog()
+        findViewById<Button>(R.id.accountSwitchButton).apply {
+            text = "🚪 Logout / Switch"
+            setOnClickListener {
+                securePrefs(ISP_SESSION_PREFS).edit().remove("EBONE_$targetZone").remove("EBONE_${targetZone}_user").apply()
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+                loginDone = false
+                loginAttemptInProgress = false
+                webView.loadUrl("https://partner.ebill.pk/logincheck")
+                Toast.makeText(this@EboneWebViewActivity, "Session cleared. Logging in afresh...", Toast.LENGTH_SHORT).show()
+            }
         }
 
         configureWebView()
@@ -185,12 +191,32 @@ class EboneWebViewActivity : AppCompatActivity() {
         }
     }
 
+    private fun showInvalidCredentialsPopup(isp: String, zone: String) {
+        AlertDialog.Builder(this)
+            .setTitle("⚠️ $isp Login Failed ($zone)")
+            .setMessage("Invalid username or password detected. Please verify your login credentials in ISP Panel Settings.")
+            .setPositiveButton("Open ISP Settings") { _, _ ->
+                startActivity(Intent(this, IspPanelSettingsActivity::class.java))
+                finish()
+            }
+            .setNegativeButton("Close") { dialog, _ ->
+                dialog.dismiss()
+                finish()
+            }
+            .setCancelable(false)
+            .show()
+    }
+
     private fun handlePageLoaded(url: String) {
         when {
             url.contains("logincheck", ignoreCase = true) || url.contains("login", ignoreCase = true) -> {
                 loginDone = false
-                if (!loginAttemptInProgress) {
-                    tryAutoLogin()
+                webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText : ''; })()") { bodyText ->
+                    if (bodyText != null && (bodyText.contains("Invalid username or password", ignoreCase = true) || bodyText.contains("Invalid credentials", ignoreCase = true))) {
+                        showInvalidCredentialsPopup("EBONE", targetZone)
+                    } else if (!loginAttemptInProgress) {
+                        tryAutoLogin()
+                    }
                 }
             }
             url.contains("/clients/clientChange/") && manualAction != null -> {
@@ -201,27 +227,61 @@ class EboneWebViewActivity : AppCompatActivity() {
                     fillDealerTopupAmountAndSubmit()
                 }
             }
+            url.contains("/clients/clientStats/") && autoActivateCustomerId != null -> {
+                IspPackageActivationHandler.handleEbonePackageActivation(
+                    this,
+                    webView,
+                    url,
+                    autoActivateCustomerId,
+                    onSuccess = { newExpiry ->
+                        setResult(RESULT_OK, Intent().apply {
+                            putExtra("activation_success", true)
+                            putExtra("manual_action_success", true)
+                            putExtra("new_expiry_date", newExpiry)
+                        })
+                        finish()
+                    },
+                    onFailure = { reason ->
+                        setResult(RESULT_OK, Intent().apply {
+                            putExtra("activation_success", false)
+                            putExtra("error_reason", reason)
+                        })
+                        finish()
+                    }
+                )
+            }
             url.contains("/clients/clientStats/") -> {
                 clickEboneSubmitButton()
             }
             url.contains("/clients/client/") && autoActivateCustomerId != null -> {
                 val urlCustomerId = url.substringAfterLast("/clients/client/").substringBefore("?").trim().trimEnd('/')
-                if (urlCustomerId != autoActivateCustomerId) {
-                    Log.e("EboneWebView", "Customer ID mismatch — expected $autoActivateCustomerId, got $urlCustomerId.")
-                } else if (manualAction == "SUSPEND") {
+                if (manualAction == "SUSPEND") {
                     if (!eboneSuspendCaptureDone) {
                         eboneSuspendCaptureDone = true
                         captureEbonePasswordFromProfileThenChange(urlCustomerId)
                     }
-                } else if (manualAction == "RELIEF_VIEW") {
-                    webView.postDelayed({
-                        setResult(RESULT_OK, Intent().apply { putExtra("activation_success", true) })
-                        finish()
-                    }, 1500)
-                } else if (eboneSubmitClicked) {
-                    fetchEboneExpiryAndFinish()
                 } else {
-                    clickEboneActiveLink()
+                    IspPackageActivationHandler.handleEbonePackageActivation(
+                        this,
+                        webView,
+                        url,
+                        autoActivateCustomerId,
+                        onSuccess = { newExpiry ->
+                            setResult(RESULT_OK, Intent().apply {
+                                putExtra("activation_success", true)
+                                putExtra("manual_action_success", true)
+                                putExtra("new_expiry_date", newExpiry)
+                            })
+                            finish()
+                        },
+                        onFailure = { reason ->
+                            setResult(RESULT_OK, Intent().apply {
+                                putExtra("activation_success", false)
+                                putExtra("error_reason", reason)
+                            })
+                            finish()
+                        }
+                    )
                 }
             }
             url.contains("/clients/client/") -> {
@@ -265,40 +325,35 @@ class EboneWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
-        if (manualAction == "DEALER_TOPUP") {
+        val reqModule = IspAccountResolver.resolveModule(manualAction, autoActivateCustomerId)
+        val ispUsername = IspAccountResolver.getActiveUsername(this, "EBONE", targetZone, reqModule)
+
+        val cookieUser = securePrefs(ISP_SESSION_PREFS).getString("EBONE_${targetZone}_user", "") ?: ""
+
+        // Clear session cookie if DEALER_TOPUP or if session cookie belongs to a DIFFERENT user (e.g. FastNet vs Akmal):
+        if (manualAction == "DEALER_TOPUP" || (!ispUsername.isNullOrEmpty() && cookieUser.isNotEmpty() && !cookieUser.equals(ispUsername, true))) {
+            securePrefs(ISP_SESSION_PREFS).edit().remove("EBONE_$targetZone").remove("EBONE_${targetZone}_user").apply()
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
             webView.loadUrl("https://partner.ebill.pk/logincheck")
             return
         }
 
-        val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("EBONE_$targetZone", "") ?: ""
-        if (savedCookie.isNotEmpty()) {
-            Log.d("EboneWebView", "Loading with saved cookie for EBONE / $targetZone")
-            val domainUrl = "https://partner.ebill.pk"
-            savedCookie.split(";").forEach {
-                if (it.isNotBlank()) CookieManager.getInstance().setCookie(domainUrl, it.trim())
-            }
-            CookieManager.getInstance().flush()
-            webView.loadUrl("$domainUrl/clients")
-            return
-        }
-
-        val rawAccounts = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
-        val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-        val active = securePrefs(getEbonePrefsName()).getString(KEY_ACTIVE, "") ?: ""
-
-        if (active.isNotEmpty() && accounts.has(active)) {
-            val acc = accounts.getJSONObject(active)
-            val cookie = acc.optString("cookie", "")
-            if (cookie.isNotEmpty()) {
-                CookieManager.getInstance().setCookie("https://partner.ebill.pk", cookie)
+        if (!ispUsername.isNullOrEmpty()) {
+            val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("EBONE_$targetZone", "") ?: ""
+            if (savedCookie.isNotEmpty() && (cookieUser.isEmpty() || cookieUser.equals(ispUsername, true))) {
+                Log.d("EboneWebView", "Loading with saved cookie for $ispUsername / $targetZone")
+                val domainUrl = "https://partner.ebill.pk"
+                savedCookie.split(";").forEach {
+                    if (it.isNotBlank()) CookieManager.getInstance().setCookie(domainUrl, it.trim())
+                }
                 CookieManager.getInstance().flush()
-                webView.loadUrl("https://partner.ebill.pk/clients")
+                webView.loadUrl("$domainUrl/clients")
                 return
             }
         }
 
+        // Just load the login page and STOP. No finish(), no auto-login if paused.
         webView.loadUrl("https://partner.ebill.pk/logincheck")
     }
 
@@ -312,51 +367,24 @@ class EboneWebViewActivity : AppCompatActivity() {
             return
         }
 
-        // 2. Check if a named account was selected or passed in intent
+        // 2. If forceAccountName was requested (e.g. Dealer), but forcedDealerUsername is null (e.g. paused),
+        // we MUST STOP. We should NOT fall back to Franchise credentials and auto-login!
         if (!forceAccountName.isNullOrBlank()) {
-            val dealerUsername = IspPanelSettingsActivity.getDealerUsername(this, "EBONE", targetZone, forceAccountName!!)
-            val dealerPassword = IspPanelSettingsActivity.getDealerPassword(this, "EBONE", targetZone, forceAccountName!!)
-            if (!dealerUsername.isNullOrEmpty() && !dealerPassword.isNullOrEmpty()) {
-                doLoginWith(dealerUsername, dealerPassword)
-                return
-            }
-
-            val rawAccounts = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
-            val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-            if (accounts.has(forceAccountName)) {
-                val acc = accounts.getJSONObject(forceAccountName!!)
-                val u = acc.optString("username", "")
-                val p = acc.optString("password", "")
-                if (u.isNotEmpty() && p.isNotEmpty()) {
-                    doLoginWith(u, p)
-                    return
-                }
-            }
+            loginAttemptInProgress = false
+            return
         }
 
         // 3. Check ISP Panel Settings for this zone
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() }
-        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, "EBONE", targetZone)?.takeIf { it.isNotBlank() }
+        // Note: For DEALER_TOPUP we use the main franchise credentials so it can send credit
+        val reqModule = IspAccountResolver.resolveModule(manualAction, autoActivateCustomerId)
+        val ispUsername = IspAccountResolver.getActiveUsername(this, "EBONE", targetZone, reqModule)?.takeIf { it.isNotBlank() }
+        val ispPassword = IspAccountResolver.getActivePassword(this, "EBONE", targetZone, reqModule)?.takeIf { it.isNotBlank() }
         if (!ispUsername.isNullOrBlank() && !ispPassword.isNullOrBlank()) {
             doLoginWith(ispUsername, ispPassword)
             return
         }
 
-        // 4. Check active account from local zone-scoped accounts
-        val rawAccounts = securePrefs(getEbonePrefsName()).getString(KEY_ACCOUNTS, "") ?: ""
-        val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
-        val active = securePrefs(getEbonePrefsName()).getString(KEY_ACTIVE, "") ?: ""
-        val accountName = if (active.isNotEmpty() && accounts.has(active)) active else if (accounts.keys().hasNext()) accounts.keys().next() else null
-        if (accountName != null && accounts.has(accountName)) {
-            val acc = accounts.getJSONObject(accountName)
-            val u = acc.optString("username", "")
-            val p = acc.optString("password", "")
-            if (u.isNotEmpty() && p.isNotEmpty()) {
-                doLoginWith(u, p)
-                return
-            }
-        }
-
+        // DO NOT auto-login, just wait on the loaded login page.
         loginAttemptInProgress = false
     }
 
@@ -370,6 +398,9 @@ class EboneWebViewActivity : AppCompatActivity() {
     private fun doLoginWith(username: String, password: String, attempt: Int = 1) {
         val safeU = escapeJs(username)
         val safeP = escapeJs(password)
+        runOnUiThread {
+            Toast.makeText(this, "Logging in with: $username", Toast.LENGTH_SHORT).show()
+        }
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
@@ -412,11 +443,15 @@ class EboneWebViewActivity : AppCompatActivity() {
     }
 
     private fun cacheIspSessionCookieIfApplicable(isp: String, domain: String) {
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, isp, targetZone)
+        val reqModule = IspAccountResolver.resolveModule(manualAction, autoActivateCustomerId)
+        val ispUsername = IspAccountResolver.getActiveUsername(this, isp, targetZone, reqModule)
         if (!ispUsername.isNullOrEmpty()) {
             val cookie = CookieManager.getInstance().getCookie(domain)
             if (!cookie.isNullOrEmpty()) {
-                securePrefs(ISP_SESSION_PREFS).edit().putString("${isp}_$targetZone", cookie).apply()
+                securePrefs(ISP_SESSION_PREFS).edit()
+                    .putString("${isp}_$targetZone", cookie)
+                    .putString("${isp}_${targetZone}_user", ispUsername)
+                    .apply()
             }
         }
     }
@@ -644,8 +679,36 @@ class EboneWebViewActivity : AppCompatActivity() {
             val clean = if (raw != null && raw != "null") raw.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\") else ""
             val balance = Regex("\"dealerBalance\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
             val amount = topupAmount?.toDoubleOrNull() ?: 0.0
-            val logEntry = mapOf("dealerId" to (dealerInternalId ?: ""), "dealerName" to (dealerDisplayName ?: ""), "panel" to "EBONE", "ispDealerId" to (dealerEboneId ?: ""), "amount" to amount, "submittedAt" to System.currentTimeMillis(), "resultText" to clean.take(500), "dealerBalanceAfter" to balance, "sourceTransactionId" to (sourceTransactionId ?: ""))
+            val currentComp = CompanyDataHelper.getCurrentCompanyId(this) ?: targetZone ?: "OKARA"
+            val canonicalZone = CompanyDataHelper.getCanonicalDocId(currentComp)
+
+            val logEntry = mapOf(
+                "dealerId" to (dealerInternalId ?: ""),
+                "dealerName" to (dealerDisplayName ?: ""),
+                "panel" to "EBONE",
+                "ispDealerId" to (dealerEboneId ?: ""),
+                "amount" to amount,
+                "submittedAt" to System.currentTimeMillis(),
+                "createdAt" to System.currentTimeMillis(),
+                "companyId" to currentComp,
+                "company" to currentComp,
+                "zone" to canonicalZone,
+                "resultText" to clean.take(500),
+                "dealerBalanceAfter" to balance,
+                "sourceTransactionId" to (sourceTransactionId ?: "")
+            )
             db.collection("dealerPayments").add(logEntry)
+
+            if (!dealerInternalId.isNullOrBlank()) {
+                db.collection("dealers").document(dealerInternalId!!)
+                    .update("eboneBalance", com.google.firebase.firestore.FieldValue.increment(amount))
+
+                try {
+                    com.google.firebase.database.FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                        .getReference("dealers").child(dealerInternalId!!).child("eboneBalance")
+                        .setValue(com.google.firebase.database.ServerValue.increment(amount))
+                } catch (_: Exception) {}
+            }
 
             val smsId = sourceTransactionId?.takeIf { it.isNotBlank() }
             if (smsId != null) {
