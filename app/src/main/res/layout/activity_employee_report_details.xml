@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#ECEFF1">
+
+    <TextView
+        android:id="@+id/employeeNameText"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:background="#455A64"
+        android:gravity="bottom|center_horizontal"
+        android:paddingBottom="14dp"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_margin="8dp"
+        android:background="#FFFFFF"
+        android:elevation="2dp"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <AutoCompleteTextView
+                android:id="@+id/searchDetailEditText"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:hint="🔍 Search complaints..."
+                android:padding="12dp"
+                android:background="@android:color/transparent"
+                android:inputType="text"
+                android:textSize="15sp"
+                android:completionThreshold="1" />
+
+            <Button
+                android:id="@+id/monthFilterButton"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginEnd="4dp"
+                android:backgroundTint="#455A64"
+                android:text="Month"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp" />
+
+            <ImageButton
+                android:id="@+id/dateRangePickerButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_calendar"
+                android:contentDescription="Select Date Range"
+                app:tint="#455A64" />
+        </LinearLayout>
+
+        <!-- Professional Segmented Control (CUSTOMER VIEW | DATE VIEW) with Transparent Background -->
+        <LinearLayout
+            android:id="@+id/llRepeatToggleContainer"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_decent_card"
+            android:padding="3dp">
+
+            <Button
+                android:id="@+id/btnRepeatCustomerView"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="👤 CUSTOMER VIEW"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:singleLine="true"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp"
+                android:stateListAnimator="@null" />
+
+            <Button
+                android:id="@+id/btnRepeatDateView"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="📅 DATE VIEW"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:singleLine="true"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp"
+                android:stateListAnimator="@null" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#EEEEEE"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <Spinner
+                android:id="@+id/employeeSpinner"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_weight="0.95"
+                android:background="@drawable/bg_spinner"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:spinnerMode="dropdown" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_weight="1.05"
+                android:layout_marginStart="6dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/repeatsFilterText"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_spinner"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:paddingStart="2dp"
+                    android:paddingEnd="2dp"
+                    android:singleLine="true"
+                    android:text="Repeats: 0"
+                    android:textColor="#455A64"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ncFilterText"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_spinner"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:paddingStart="2dp"
+                    android:paddingEnd="2dp"
+                    android:singleLine="true"
+                    android:text="NC: 0"
+                    android:textColor="#455A64"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/detailRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

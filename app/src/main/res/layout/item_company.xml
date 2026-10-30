@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:layout_marginBottom="10dp"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvCompanyName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Company Name"
+            android:textSize="18sp"
+            android:textColor="#0D47A1"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvLicenseStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ACTIVE"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:background="#2E7D32"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvCompanyId"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ID: LHR-001"
+        android:textSize="14sp"
+        android:textColor="#424242"
+        android:textStyle="bold"
+        android:layout_marginTop="6dp" />
+
+    <TextView
+        android:id="@+id/tvCompanyCity"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="City: Lahore"
+        android:textSize="14sp"
+        android:textColor="#616161"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/tvLicenseLimits"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Mgr: 2 | Sup: 3 | Emp: 20 | Cust: 100 | Dlr: 10"
+        android:textSize="13sp"
+        android:textColor="#C62828"
+        android:textStyle="bold"
+        android:layout_marginTop="6dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp"
+        android:gravity="end">
+
+        <Button
+            android:id="@+id/btnEditCompany"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Edit"
+            android:textSize="11sp"
+            android:backgroundTint="#0D47A1"
+            android:textColor="#FFFFFF"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnSoftReset"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Soft Reset"
+            android:textSize="11sp"
+            android:backgroundTint="#EF6C00"
+            android:textColor="#FFFFFF"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnHardReset"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Hard Reset (00)"
+            android:textSize="11sp"
+            android:backgroundTint="#C62828"
+            android:textColor="#FFFFFF"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btnDeleteCompany"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Delete"
+            android:textSize="11sp"
+            android:backgroundTint="#37474F"
+            android:textColor="#FFFFFF" />
+
+    </LinearLayout>
+
+</LinearLayout>

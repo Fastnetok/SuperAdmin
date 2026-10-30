@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F4F6FA">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="76dp"
+        android:background="#0D47A1" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#F4F6FA"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Header -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="10dp">
+                <ImageButton
+                    android:id="@+id/btnBack"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_arrow_back"
+                    app:tint="#0D2E5C" />
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="Unpaid Package Activation"
+                    android:textColor="#0D2E5C"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+                <Space android:layout_width="42dp" android:layout_height="1dp" />
+            </LinearLayout>
+
+            <!-- Dropdowns -->
+            <LinearLayout
+                android:id="@+id/btnReliefActiveList"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_spinner"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp">
+                <TextView
+                    android:id="@+id/tvReliefActiveCount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Relief Active Users (0)"
+                    android:textStyle="bold" />
+                <ImageView android:layout_width="20dp" android:layout_height="20dp" android:src="@drawable/ic_arrow_drop_down" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/btnDisabledUsersList"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_spinner"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp">
+                <TextView
+                    android:id="@+id/tvDisabledUsersCount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Disabled Users (0)"
+                    android:textColor="#C62828"
+                    android:textStyle="bold" />
+                <ImageView android:layout_width="20dp" android:layout_height="20dp" android:src="@drawable/ic_arrow_drop_down" />
+            </LinearLayout>
+
+            <!-- Company -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Company" android:textStyle="bold" />
+            <Spinner
+                android:id="@+id/spinnerCompany"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_spinner" />
+
+            <EditText android:id="@+id/etCustomerUrl" android:layout_width="match_parent" android:layout_height="46dp" android:visibility="gone" />
+
+            <!-- Search -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Search Customer" android:textStyle="bold" />
+            <AutoCompleteTextView
+                android:id="@+id/etCustomerSearch"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_spinner"
+                android:paddingStart="12dp"
+                android:hint="Customer ID / Name" />
+
+            <!-- Info Display -->
+            <TextView android:id="@+id/tvCustomer" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" android:text="Customer: —" />
+            <TextView android:id="@+id/tvCustomerId" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Customer ID: —" />
+            <TextView android:id="@+id/tvPackage" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Package: —" />
+            <TextView android:id="@+id/tvPackagePrice" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Package Price: Rs 0" />
+
+            <Button android:id="@+id/btnSaveNewUser" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="18dp" android:text="SAVE NEW USER" android:visibility="gone" />
+
+            <!-- Test Buttons -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnTestDisableNow" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:backgroundTint="#C62828" android:text="DISABLE NOW" android:textColor="#FFFFFF" />
+                <Button android:id="@+id/btnTestEnableNow" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:layout_marginStart="6dp" android:backgroundTint="#2E7D32" android:text="ENABLE NOW" android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- Relief Selection -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Relief Period" android:textStyle="bold" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:gravity="center_vertical">
+                <HorizontalScrollView android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:scrollbars="none">
+                    <LinearLayout android:id="@+id/quickDaysContainer" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal" />
+                </HorizontalScrollView>
+                <ImageButton android:id="@+id/btnCalendar" android:layout_width="46dp" android:layout_height="46dp" android:layout_marginStart="8dp" android:background="@drawable/bg_spinner" android:src="@android:drawable/ic_menu_my_calendar" />
+            </LinearLayout>
+
+            <!-- Dates -->
+            <TextView android:id="@+id/tvStartDate" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" android:text="Start Date: —" />
+            <TextView android:id="@+id/tvSuspendDate" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Suspend Date: —" />
+
+            <Button android:id="@+id/btnActivateRelief" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="24dp" android:text="ACTIVATE ON RELIEF" />
+            <Button android:id="@+id/btnReactivate" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="10dp" android:text="RE-ACTIVATE AFTER PAYMENT" android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

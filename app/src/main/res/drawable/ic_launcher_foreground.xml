@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Centered Crown Body in Gold -->
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M34,68 L74,68 L80,40 L64,52 L54,32 L44,52 L28,40 Z" />
+    <!-- Centered Crown Base -->
+    <path
+        android:fillColor="#FFA000"
+        android:pathData="M32,74 L76,74 L76,81 L32,81 Z" />
+    <!-- Centered Crown Jewels -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,36 C29.5,36 31,37.5 31,39 C31,40.5 29.5,42 28,42 C26.5,42 25,40.5 25,39 C25,37.5 26.5,36 28,36 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28 C55.5,28 57,29.5 57,31 C57,32.5 55.5,34 54,34 C52.5,34 51,32.5 51,31 C51,29.5 52.5,28 54,28 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M80,36 C81.5,36 83,37.5 83,39 C83,40.5 81.5,42 80,42 C78.5,42 77,40.5 77,39 C77,37.5 78.5,36 80,36 Z" />
+</vector>
