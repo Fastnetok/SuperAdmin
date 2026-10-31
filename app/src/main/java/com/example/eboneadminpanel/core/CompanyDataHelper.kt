@@ -9,11 +9,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 object CompanyDataHelper {
 
     private fun normalizeCompanyId(value: String?): String? {
-        return value
-            ?.trim()
-            ?.uppercase()
-            ?.replace("-", "")
-            ?.takeIf { it.isNotBlank() && it != "ALL" }
+        val clean = value?.trim()?.uppercase()?.takeIf { it.isNotBlank() && it != "ALL" && it != "ALL COMPANIES" } ?: return null
+        return clean
     }
 
     fun normalizeToCanonical(value: String?): String? {
@@ -22,7 +19,7 @@ object CompanyDataHelper {
             clean.contains("HAV") -> "HAV"
             clean.contains("OKA") -> "OKA"
             clean.contains("REN") -> "REN"
-            clean.contains("DEP") -> "DEP"
+            clean.contains("DEP") || clean.contains("DEO") -> "DEP"
             clean.contains("PAK") -> "PAK"
             clean.contains("SAH") -> "SAH"
             clean.contains("ARI") -> "ARI"
@@ -42,21 +39,18 @@ object CompanyDataHelper {
     fun getCurrentCompanyId(context: Context): String? {
         val session = SessionManager(context)
 
-        return if (session.isSuperAdmin()) {
+        val raw = if (session.isSuperAdmin()) {
             val activeCompany = session.getActiveCompanyId()
-
-            if (activeCompany?.trim()?.equals(
-                    "ALL",
-                    ignoreCase = true
-                ) == true
-            ) {
+            if (activeCompany?.trim()?.equals("ALL", ignoreCase = true) == true) {
                 null
             } else {
-                normalizeCompanyId(activeCompany) ?: "OKA001"
+                activeCompany ?: session.getCompanyId()
             }
         } else {
-            normalizeCompanyId(session.getCompanyId()) ?: "OKA001"
+            session.getCompanyId()
         }
+
+        return normalizeCompanyId(raw) ?: "OKA-001"
     }
 
     private fun isViewingAllCompanies(context: Context): Boolean {
@@ -162,39 +156,39 @@ object CompanyDataHelper {
         context: Context,
         doc: DocumentSnapshot
     ): Boolean {
+        if (isViewingAllCompanies(context)) return true
         val itemCompanyId = doc.getString("companyId")
             ?: doc.getString("company")
             ?: doc.getString("companyName")
             ?: doc.getString("companyCode")
             ?: doc.getString("zone")
-            ?: doc.id
+        if (itemCompanyId.isNullOrBlank()) {
+            return true
+        }
         return matchesCompany(context, itemCompanyId)
     }
 
     fun getCanonicalDocId(input: String): String {
         val clean = input.trim().uppercase()
+        if (clean.isBlank()) return "OKA-001"
+        if ((clean.contains("DEP") || clean.contains("DEO")) && (clean.contains("DOUBLE") || clean.contains("ZONE"))) return "DEP-001"
+        if (clean.contains("OKA") && (clean.contains("DOUBLE") || clean.contains("ZONE"))) return "OKA-001"
 
         return when {
-            clean.contains("HAV") -> "HAVELI"
-            clean.contains("REN") -> "RENALA"
-            clean.contains("DEP") -> "DEPALPUR"
-            clean.contains("OKA") -> "OKARA"
-            clean.contains("PAK") -> "PAKPATTAN"
-            clean.contains("SAH") -> "SAHIWAL"
-            clean.contains("ARI") -> "ARIFWALA"
-            clean.contains("GOJ") -> "GOJRA"
-            clean.contains("HUJ") -> "HUJRA"
-            clean.contains("PAT") -> "PATTOKI"
-            clean.contains("FSD") -> "FAISALABAD"
-            clean.contains("LHR") -> "LAHORE"
-            clean.contains("VEH") -> "VEHARI"
-            clean.contains("MUL") -> "MULTAN"
-            clean.contains("SKP") -> "SHEIKHUPURA"
-            clean.contains("GRW") -> "GUJRANWALA"
-            clean.contains("SGG") -> "SARGODHA"
-            clean.contains("RYK") -> "RAHIM YAR KHAN"
-            clean.contains("KAS") -> "KASUR"
-            else -> clean.replace("-", "").replace("_", "").replace(" ", "")
+            clean.contains("HAV") -> "HAV-001"
+            clean.contains("REN") -> "REN-001"
+            clean.contains("DEP") || clean.contains("DEO") -> "DEP-001"
+            clean.contains("OKA") -> "OKA-001"
+            clean.contains("PAK") -> "PAK-001"
+            clean.contains("SAH") -> "SAH-001"
+            clean.contains("ARI") -> "ARI-001"
+            clean.contains("GOJ") -> "GOJ-001"
+            clean.contains("HUJ") -> "HUJ-001"
+            clean.contains("PAT") -> "PAT-001"
+            clean.contains("FSD") -> "FSD-001"
+            clean.contains("LHR") -> "LHR-001"
+            clean.contains("-") || clean.matches(Regex("^[A-Z]{3}\\d+$")) -> clean
+            else -> clean
         }
     }
 

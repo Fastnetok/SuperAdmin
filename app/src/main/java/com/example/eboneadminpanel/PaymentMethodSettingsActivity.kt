@@ -179,19 +179,38 @@ class PaymentMethodSettingsActivity : AppCompatActivity() {
      * App reads this same document without any signed-in Firebase user,
      * unlike this Admin Panel). */
     private fun loadCurrentSettings() {
+        // Step 1: Load INSTANTLY from local disk cache (1 millisecond response!)
         db.collection("appSettings").document("paymentMethods")
-            .get()
+            .get(com.google.firebase.firestore.Source.CACHE)
             .addOnSuccessListener { doc ->
-                if (!doc.exists()) return@addOnSuccessListener
-                methods.forEach { (field, _) ->
-                    val enabled = doc.getBoolean(field) ?: true
-                    switches[field]?.isChecked = enabled
+                if (doc != null && doc.exists()) {
+                    applySwitchesFromDoc(doc)
+                }
+                fetchLatestSettingsFromNetwork()
+            }
+            .addOnFailureListener {
+                fetchLatestSettingsFromNetwork()
+            }
+    }
+
+    private fun fetchLatestSettingsFromNetwork() {
+        db.collection("appSettings").document("paymentMethods")
+            .get(com.google.firebase.firestore.Source.DEFAULT)
+            .addOnSuccessListener { doc ->
+                if (doc != null && doc.exists()) {
+                    applySwitchesFromDoc(doc)
                 }
             }
             .addOnFailureListener { e ->
                 Log.e("PaymentMethodSettings", "Load failed", e)
-                Toast.makeText(this, "Could not load current settings: ${e.message}", Toast.LENGTH_LONG).show()
             }
+    }
+
+    private fun applySwitchesFromDoc(doc: com.google.firebase.firestore.DocumentSnapshot) {
+        methods.forEach { (field, _) ->
+            val enabled = doc.getBoolean(field) ?: true
+            switches[field]?.isChecked = enabled
+        }
     }
 
     /**

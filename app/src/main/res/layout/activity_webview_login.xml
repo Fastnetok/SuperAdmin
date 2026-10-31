@@ -14,10 +14,11 @@
         android:gravity="center_vertical">
 
         <TextView
+            android:id="@+id/tvHeaderTitle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="ebill.pk"
+            android:text="Panel"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:textStyle="bold"
@@ -33,6 +34,7 @@
             android:backgroundTint="#33FFFFFF"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
+            android:visibility="gone"
             android:stateListAnimator="@null" />
 
         <ImageButton
@@ -45,6 +47,7 @@
             android:layout_marginStart="8dp"
             android:contentDescription="Mic"
             android:elevation="2dp"
+            android:visibility="gone"
             app:tint="#1B5E20" />
 
     </LinearLayout>

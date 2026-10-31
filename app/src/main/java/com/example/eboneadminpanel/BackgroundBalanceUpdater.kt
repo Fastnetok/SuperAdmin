@@ -39,8 +39,10 @@ object BackgroundBalanceUpdater {
         val timeoutMs = if (isp.uppercase() == "WATEEN") 35000L else 20000L
         handler.postDelayed(timeoutRunnable, timeoutMs)
 
-        var username = IspPanelSettingsActivity.getSavedUsername(context, isp, zone)
-        var password = IspPanelSettingsActivity.getSavedPassword(context, isp, zone)
+        var username = IspPanelSettingsActivity.getSavedFranchiseAccount(context, isp, zone)?.first
+            ?: IspPanelSettingsActivity.getSavedUsername(context, isp, zone)
+        var password = IspPanelSettingsActivity.getSavedFranchiseAccount(context, isp, zone)?.second
+            ?: IspPanelSettingsActivity.getSavedPassword(context, isp, zone)
         var accountCookie = ""
 
         val cleanZone = zone.trim().lowercase().replace("-", "_")

@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebStorage
@@ -96,6 +97,12 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.loginWebView)
 
+        val activeComp = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: "OKA-001"
+        val cleanComp = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(activeComp)
+        findViewById<TextView>(R.id.tvHeaderTitle)?.text = "Zong ($cleanComp)"
+
         findViewById<Button>(R.id.accountSwitchButton).setOnClickListener {
             showAccountListDialog()
         }
@@ -111,15 +118,30 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         settings.userAgentString =
             "Mozilla/5.0 (Linux; Android 6.0) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
 
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                if (message != null && (message.contains("Data Tables", ignoreCase = true) || message.contains("DataTables", ignoreCase = true) || message.contains("Invalid JSON", ignoreCase = true))) {
+                    result?.confirm()
+                    return true
+                }
+                return super.onJsAlert(view, url, message, result)
+            }
+        }
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                webView.evaluateJavascript("(function(){ window.alert = function(m){ console.log('Suppressed alert: ' + m); }; if (window.jQuery && $.fn && $.fn.dataTable) { $.fn.dataTable.ext.errMode = 'none'; } })()", null)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (url == null) return
                 CookieManager.getInstance().flush()
 
-                // Crucial: remove all target="_blank" so links open in SAME WebView
+                // Crucial: remove all target="_blank" so links open in SAME WebView & Suppress DataTables Alerts
                 webView.evaluateJavascript(
                     "(function(){" +
+                            "  window.alert = function(m){ console.log('Suppressed alert: ' + m); };" +
+                            "  if (window.jQuery && $.fn && $.fn.dataTable) { $.fn.dataTable.ext.errMode = 'none'; }" +
                             "  var links = document.querySelectorAll('a[target=\"_blank\"]');" +
                             "  for(var i=0; i<links.length; i++) { links[i].removeAttribute('target'); }" +
                             "})()", null
@@ -275,12 +297,12 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     }
 
     private fun prepareCustomerList() {
-        Log.d("ZongOkaraWebView", "Zong Okara → Preparing customer list with 1000 rows")
+        Log.d("ZongOkaraWebView", "Zong Okara → Preparing customer list with 25 rows")
         webView.evaluateJavascript(
             "(function(){" +
-                    "var sel=document.querySelector('select[name=\"managercustomers_length\"]');" +
+                    "var sel=document.querySelector('select[name=\"managercustomers_length\"], select[name*=\"length\"], .dataTables_length select');" +
                     "if(!sel) return 'length_selector_not_found';" +
-                    "sel.value='1000';" +
+                    "sel.value='25';" +
                     "sel.dispatchEvent(new Event('change',{bubbles:true}));" +
                     "return 'prepared';" +
                     "})()"
@@ -404,72 +426,117 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     }
 
     private fun getZongCredentials(zone: String): Pair<String?, String?> {
-        val u = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", zone)
-        val p = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", zone)
+        val targetZone = intent.getStringExtra("target_zone")?.ifBlank { null }
+            ?: com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: zone
+
+        val cleanZone = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(targetZone) ?: targetZone
+        val u = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", cleanZone)
+            ?: IspPanelSettingsActivity.getSavedUsername(this, "ZONG", targetZone)
+            ?: IspPanelSettingsActivity.getSavedUsername(this, "ZONG", zone)
+        val p = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", cleanZone)
+            ?: IspPanelSettingsActivity.getSavedPassword(this, "ZONG", targetZone)
+            ?: IspPanelSettingsActivity.getSavedPassword(this, "ZONG", zone)
         return u to p
     }
 
     private fun loadInitialPage() {
-        val (username, password) = getZongCredentials("Okara")
-        
-        Log.e("ZONG_DEBUG", "🔍 ZongOkaraWebViewActivity -> ZONE=Okara, loaded username='$username'")
-        Log.d("ZongOkaraWebView", "Zong Okara → Login Started → Okara URL ($loginUrl) → User: $username")
+        val rawZone = intent.getStringExtra("target_zone")?.ifBlank { null }
+            ?: com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: "OKA-001"
+        val canonicalZone = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(rawZone) ?: rawZone
+        val (username, password) = getZongCredentials(canonicalZone)
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
-            Log.e("ZongOkaraWebView", "Zong Okara → Okara credentials missing or paused!")
+            IspPanelSettingsActivity.autoSyncCloudAccountsToLocal(this) {
+                val (syncU, syncP) = getZongCredentials(canonicalZone)
+                if (!syncU.isNullOrBlank() && !syncP.isNullOrBlank()) {
+                    Log.d("ZongOkaraWebView", "Zong → Restored credentials from cloud sync: $syncU")
+                    tryAutoLogin()
+                }
+            }
+        }
+        
+        Log.e("ZONG_DEBUG", "🔍 ZongOkaraWebViewActivity -> ZONE=$canonicalZone, loaded username='$username'")
+        Log.d("ZongOkaraWebView", "Zong → Login Started → URL ($loginUrl) → User: $username")
+
+        if (username.isNullOrBlank() || password.isNullOrBlank()) {
+            Log.e("ZongOkaraWebView", "Zong credentials missing or paused for $canonicalZone!")
             webView.loadUrl(loginUrl)
             return
         }
 
-        // STRICT ISOLATION: Purge global cookies and WebView storage for domain
         val cm = CookieManager.getInstance()
-        cm.removeSessionCookies(null)
-        cm.removeAllCookies(null)
-        cm.flush()
-
-        webView.clearCache(true)
-        webView.clearHistory()
-        webView.clearFormData()
-        WebStorage.getInstance().deleteAllData()
-
         val savedCookie = getSessionCookie()
         
         if (savedCookie.isNotBlank()) {
-            Log.d("ZongOkaraWebView", "Zong Okara → Restoring Okara session cookie")
+            Log.d("ZongOkaraWebView", "Zong → Restoring session cookie for $canonicalZone")
             savedCookie.split(";").forEach { part ->
                 if (part.isNotBlank()) cm.setCookie(domain, part.trim())
             }
             cm.flush()
             webView.loadUrl(homeUrl)
         } else {
-            Log.d("ZongOkaraWebView", "Zong Okara → No saved cookie, loading login page")
+            Log.d("ZongOkaraWebView", "Zong → Loading login page for $canonicalZone")
             webView.loadUrl(loginUrl)
         }
     }
 
     private fun tryAutoLogin(attempt: Int = 1) {
-        if (loginAttemptInProgress) return
+        if (loginAttemptInProgress || loginDone) return
         loginAttemptInProgress = true
 
-        val (username, password) = getZongCredentials("Okara")
+        val currentUrl = webView.url.orEmpty().lowercase()
+        if (!currentUrl.contains("login.php") && !currentUrl.contains("login") && currentUrl.contains("zong.com.pk")) {
+            loginAttemptInProgress = false
+            loginDone = true
+            return
+        }
 
-        Log.d("ZongOkaraWebView", "Zong Okara → Filling Okara credentials for user: $username")
+        val rawZone = intent.getStringExtra("target_zone")?.ifBlank { null }
+            ?: com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: "OKA-001"
+        val canonicalZone = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(rawZone) ?: rawZone
+        val (username, password) = getZongCredentials(canonicalZone)
+
+        val safeU = JSONObjectEscape.forJavaScript(username.orEmpty())
+        val safeP = JSONObjectEscape.forJavaScript(password.orEmpty())
 
         webView.evaluateJavascript(
             "(function(){" +
-                    "var u=document.querySelector('input[name=username],#username');" +
-                    "var p=document.querySelector('input[name=password],#password');" +
-                    "var b=document.querySelector('button[type=submit],#send,.btn-login');" +
-                    "if(!u||!p)return 'not_ready';" +
-                    "u.value='$username'; p.value='$password';" +
-                    "if(b){ b.click(); return 'submitted'; }" +
-                    "return 'no_button';" +
+                    "  var u=document.querySelector('input[name=username],#username,input[type=text]');" +
+                    "  var p=document.querySelector('input[name=password],#password,input[type=password]');" +
+                    "  var b=document.querySelector('button[type=submit],#send,.btn-login');" +
+                    "  if(!u||!p)return 'not_ready';" +
+                    "  u.focus(); u.value='$safeU';" +
+                    "  u.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "  u.dispatchEvent(new Event('change',{bubbles:true}));" +
+                    "  p.focus(); p.value='$safeP';" +
+                    "  p.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "  p.dispatchEvent(new Event('change',{bubbles:true}));" +
+                    "  if(b){ b.click(); return 'submitted'; }" +
+                    "  return 'no_button';" +
                     "})()"
         ) { raw ->
-            loginAttemptInProgress = false
-            Log.d("ZongOkaraWebView", "Zong Okara → Login Submit Result: $raw")
-            if (raw.contains("not_ready") && attempt < 5) {
-                webView.postDelayed({ tryAutoLogin(attempt + 1) }, 1000)
+            val result = raw?.trim()?.removeSurrounding("\"").orEmpty()
+            if (result == "submitted") {
+                loginAttemptInProgress = false
+                webView.postDelayed({
+                    val urlAfter = webView.url.orEmpty().lowercase()
+                    if (urlAfter.contains("login") && attempt < 2) {
+                        tryAutoLogin(attempt + 1)
+                    } else if (!urlAfter.contains("login")) {
+                        loginDone = true
+                    }
+                }, 2000)
+            } else if (result.contains("not_ready") && attempt < 2) {
+                loginAttemptInProgress = false
+                webView.postDelayed({ tryAutoLogin(attempt + 1) }, 800)
+            } else {
+                loginAttemptInProgress = false
             }
         }
     }
@@ -560,7 +627,6 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             } else if (attempt < 10) {
                 webView.postDelayed({ readZongOkaraBalance(attempt + 1) }, 1000)
             } else {
-                Toast.makeText(this, "Zong Okara balance could not be read.", Toast.LENGTH_SHORT).show()
                 setResult(RESULT_CANCELED)
                 finish()
             }
@@ -619,7 +685,6 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     }
 
     private fun finishFailure(reason: String) {
-        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
         finish()
     }
 

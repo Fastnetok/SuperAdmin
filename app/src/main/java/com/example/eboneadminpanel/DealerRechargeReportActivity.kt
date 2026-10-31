@@ -372,50 +372,50 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         }
 
         db.collection("dealerTransactions")
-            .whereGreaterThanOrEqualTo("createdAt", rangeStart)
-            .whereLessThanOrEqualTo("createdAt", rangeEnd)
             .get()
             .addOnSuccessListener { snapshot ->
                 snapshot.documents.forEach { doc ->
                     if (!CompanyDataHelper.belongsToCurrentCompany(this@DealerRechargeReportActivity, doc)) return@forEach
-                    val status = doc.getString("status") ?: ""
-                    val transferStatus = doc.getString("transferStatus") ?: ""
-                    if (status == "COMPLETED" || status == "VERIFIED" || transferStatus == "TRANSFERRED") {
-                        val p = doc.getString("panel") ?: doc.getString("company") ?: ""
-                        val ispName = when (p.uppercase()) {
-                            "EBONE", "EBILL" -> "EBONE"
-                            "WATEEN" -> "Wateen"
-                            "ZONG" -> "Zong"
-                            "JAZZ" -> "Jazz"
-                            else -> p
+                    val ts = doc.getLong("createdAt") ?: doc.getLong("submittedAt") ?: doc.getLong("timestamp") ?: 0L
+                    if (ts in rangeStart..rangeEnd) {
+                        val status = doc.getString("status") ?: ""
+                        val transferStatus = doc.getString("transferStatus") ?: ""
+                        if (status == "COMPLETED" || status == "VERIFIED" || transferStatus == "TRANSFERRED") {
+                            val p = doc.getString("panel") ?: doc.getString("company") ?: ""
+                            val ispName = when (p.uppercase()) {
+                                "EBONE", "EBILL" -> "EBONE"
+                                "WATEEN" -> "Wateen"
+                                "ZONG" -> "Zong"
+                                "JAZZ" -> "Jazz"
+                                else -> p
+                            }
+                            val dName = doc.getString("dealerName") ?: doc.getString("name") ?: "Unknown Dealer"
+                            val amt = doc.getDouble("amount") ?: 0.0
+                            masterList.add(ReportEntry(doc.id, dName, ispName, amt, ts))
                         }
-                        val dName = doc.getString("dealerName") ?: doc.getString("name") ?: "Unknown Dealer"
-                        val amt = doc.getDouble("amount") ?: 0.0
-                        val ts = doc.getLong("createdAt") ?: doc.getLong("submittedAt") ?: System.currentTimeMillis()
-                        masterList.add(ReportEntry(doc.id, dName, ispName, amt, ts))
                     }
                 }
 
                 db.collection("dealerPayments")
-                    .whereGreaterThanOrEqualTo("submittedAt", rangeStart)
-                    .whereLessThanOrEqualTo("submittedAt", rangeEnd)
                     .get()
                     .addOnSuccessListener { snap2 ->
                         snap2.documents.forEach { doc ->
                             if (!CompanyDataHelper.belongsToCurrentCompany(this@DealerRechargeReportActivity, doc)) return@forEach
-                            if (masterList.none { it.id == doc.id }) {
-                                val p = doc.getString("panel") ?: ""
-                                val ispName = when (p.uppercase()) {
-                                    "EBONE", "EBILL" -> "EBONE"
-                                    "WATEEN" -> "Wateen"
-                                    "ZONG" -> "Zong"
-                                    "JAZZ" -> "Jazz"
-                                    else -> p
+                            val ts = doc.getLong("submittedAt") ?: doc.getLong("createdAt") ?: doc.getLong("timestamp") ?: 0L
+                            if (ts in rangeStart..rangeEnd) {
+                                if (masterList.none { it.id == doc.id }) {
+                                    val p = doc.getString("panel") ?: ""
+                                    val ispName = when (p.uppercase()) {
+                                        "EBONE", "EBILL" -> "EBONE"
+                                        "WATEEN" -> "Wateen"
+                                        "ZONG" -> "Zong"
+                                        "JAZZ" -> "Jazz"
+                                        else -> p
+                                    }
+                                    val dName = doc.getString("dealerName") ?: "Unknown"
+                                    val amt = doc.getDouble("amount") ?: 0.0
+                                    masterList.add(ReportEntry(doc.id, dName, ispName, amt, ts))
                                 }
-                                val dName = doc.getString("dealerName") ?: "Unknown"
-                                val amt = doc.getDouble("amount") ?: 0.0
-                                val ts = doc.getLong("submittedAt") ?: System.currentTimeMillis()
-                                masterList.add(ReportEntry(doc.id, dName, ispName, amt, ts))
                             }
                         }
                         onLoaded()

@@ -222,7 +222,7 @@ class LiveBatchResolveActivity : AppCompatActivity() {
                     } else {
                         val script = """
                             (function(){
-                                var box = document.querySelector('input[aria-controls="allonlineUsers"]');
+                                var box = document.querySelector('input[aria-controls="userListOnline"], input[aria-controls="allonlineUsers"], .dataTables_filter input, input[type=search]');
                                 if(box){
                                     box.value = '${complaint.userId}';
                                     box.dispatchEvent(new Event('input', {bubbles:true}));

@@ -133,9 +133,14 @@ class MainActivity : AppCompatActivity(),
         }
 
         // NEW: "Active" quick link next to Dealer — opens Customer
-        // Billing directly.
+        // Billing directly for the selected active company (e.g. DEP-001)
         findViewById<TextView>(R.id.activeCustomersButton).setOnClickListener {
-            startActivity(Intent(this, CustomerBillingActivity::class.java))
+            val currentComp = com.example.superadmin.core.SessionManager(this).getActiveCompanyId() ?: "DEP-001"
+            val intent = Intent(this, CustomerBillingActivity::class.java).apply {
+                putExtra("companyId", currentComp)
+                putExtra("target_zone", currentComp)
+            }
+            startActivity(intent)
         }
 
         // NEW: "Complaint" shortcut — opens AddComplaintActivity directly
@@ -728,6 +733,19 @@ class MainActivity : AppCompatActivity(),
     override fun onResume() {
         super.onResume()
         enableMyLocationOnMap()
+        val activeComp = SessionManager(this).getActiveCompanyId() ?: "ALL"
+        val companyFilterSpinner = findViewById<Spinner>(R.id.companyFilterSpinner)
+        if (companyFilterSpinner != null && companyFilterSpinner.adapter != null) {
+            val adapter = companyFilterSpinner.adapter
+            for (i in 0 until adapter.count) {
+                if (adapter.getItem(i).toString().contains(activeComp, ignoreCase = true)) {
+                    if (companyFilterSpinner.selectedItemPosition != i) {
+                        companyFilterSpinner.setSelection(i)
+                    }
+                    break
+                }
+            }
+        }
     }
 
     @android.annotation.SuppressLint("MissingPermission")

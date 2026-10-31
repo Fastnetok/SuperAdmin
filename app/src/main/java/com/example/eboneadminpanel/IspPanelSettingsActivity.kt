@@ -51,6 +51,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
         private fun isZoneMatch(z1: String, z2: String): Boolean {
             if (z1.equals(z2, ignoreCase = true)) return true
+            if (z1.equals("ALL", ignoreCase = true) || z2.equals("ALL", ignoreCase = true) ||
+                z1.equals("DEFAULT", ignoreCase = true) || z2.equals("DEFAULT", ignoreCase = true)) return true
             val c1 = CompanyDataHelper.getCanonicalDocId(z1).uppercase()
             val c2 = CompanyDataHelper.getCanonicalDocId(z2).uppercase()
             return c1.isNotBlank() && (c1 == c2 || c1.replace("-", "") == c2.replace("-", ""))
@@ -136,7 +138,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             return legacy == requiredModule
         }
 
-        fun getSavedAccount(context: Context, isp: String, zone: String = "Okara", requiredModule: String? = null): Pair<String, String>? {
+        @JvmStatic
+        fun getSavedFranchiseAccount(context: Context, isp: String, zone: String = "Okara", requiredModule: String? = null): Pair<String, String>? {
             val arr = safeAccountsArray(context, zone) ?: return null
 
             if (isp.equals("ZONG", ignoreCase = true)) {
@@ -157,7 +160,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                             if (!obj.optBoolean("isEnabled", true)) continue
                             val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
                             val isRenala = isZoneMatch(accountZone(obj), "Renala") || isZoneMatch(accountZone(obj), "REN-001") || isZoneMatch(accountZone(obj), "REN")
-                            val isFranchiseAccount = !obj.optBoolean("isDealer", false)
+                            val isFranchiseAccount = !obj.optBoolean("isDealer", false) && obj.optString("dealerName", "").isBlank()
                             val uname = normalizedUsername(obj.optString("username"))
                             if (isZong && isFranchiseAccount && (isRenala || uname.startsWith("RN") || uname.contains("RN")) && uname != ZONG_OKARA_COMPLAINT_ACCOUNT) {
                                 val u = obj.optString("username", "")
@@ -169,39 +172,13 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 }
             }
 
-            // Pass 0: Account with EXPLICIT assigned module matching requiredModule OR (isDealer && isDefaultActive)
-            if (requiredModule != null) {
-                for (i in 0 until arr.length()) {
-                    try {
-                        val obj = arr.getJSONObject(i)
-                        if (!obj.optBoolean("isEnabled", true)) continue
-                        if (obj.optString("isp").equals(isp, ignoreCase = true) &&
-                            isZoneMatch(accountZone(obj), zone)) {
-                            
-                            val isDealer = obj.optBoolean("isDealer", false) || obj.optString("dealerName", "").isNotBlank()
-                            val isDefault = obj.optBoolean("isDefaultActive", false)
-                            val hasExplicit = hasExplicitModulePermission(obj, requiredModule)
-                            
-                            if (hasExplicit || (isDealer && isDefault)) {
-                                val u = obj.optString("username", "")
-                                val p = obj.optString("password", "")
-                                if (u.isNotBlank() && p.isNotBlank()) {
-                                    return Pair(u, p)
-                                }
-                            }
-                        }
-                    } catch (_: Exception) { }
-                }
-            }
-
-            // Pass 1: Non-dealer, exact ISP + exact Zone match (case-insensitive)
+            // Pass 1: Non-dealer (Franchise Account ONLY), STRICT exact ISP + exact Zone match
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (!obj.optBoolean("isEnabled", true)) continue
                     val isActuallyDealer = obj.optBoolean("isDealer", false) || obj.optString("dealerName", "").isNotBlank()
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
-                        !isActuallyDealer &&
+                    if (!isActuallyDealer && obj.optString("isp").equals(isp, ignoreCase = true) &&
                         isZoneMatch(accountZone(obj), zone)) {
                         
                         if (!hasModulePermission(obj, requiredModule)) continue
@@ -213,17 +190,14 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 } catch (_: Exception) { }
             }
 
-            // Pass 2: Non-dealer, exact ISP match (zone fallback)
+            // Pass 2: Non-dealer (Franchise Account ONLY), Any Zone match for this ISP
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (!obj.optBoolean("isEnabled", true)) continue
                     val isActuallyDealer = obj.optBoolean("isDealer", false) || obj.optString("dealerName", "").isNotBlank()
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
-                        !isActuallyDealer) {
-                        
+                    if (!isActuallyDealer && obj.optString("isp").equals(isp, ignoreCase = true)) {
                         if (!hasModulePermission(obj, requiredModule)) continue
-                        
                         val u = obj.optString("username", "")
                         val p = obj.optString("password", "")
                         if (u.isNotBlank() && p.isNotBlank()) return Pair(u, p)
@@ -231,49 +205,29 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 } catch (_: Exception) { }
             }
 
-            // Pass 3: Enabled Dealer account with assigned module or isDefaultActive
-            for (i in 0 until arr.length()) {
-                try {
-                    val obj = arr.getJSONObject(i)
-                    if (!obj.optBoolean("isEnabled", true)) continue
-                    val isActuallyDealer = obj.optBoolean("isDealer", false) || obj.optString("dealerName", "").isNotBlank()
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) && isActuallyDealer) {
-                        if (hasModulePermission(obj, requiredModule) || obj.optBoolean("isDefaultActive", false)) {
-                            val u = obj.optString("username", "")
-                            val p = obj.optString("password", "")
-                            if (u.isNotBlank() && p.isNotBlank()) return Pair(u, p)
-                        }
-                    }
-                } catch (_: Exception) { }
-            }
+            return null
+        }
 
-            // Pass 4: Any enabled Dealer account matching ISP
+        fun getSavedAccount(context: Context, isp: String, zone: String = "Okara", requiredModule: String? = null): Pair<String, String>? {
+            return getSavedFranchiseAccount(context, isp, zone, requiredModule)
+                ?: getSavedDealerAccount(context, isp, zone)
+        }
+
+        @JvmStatic
+        fun getSavedDealerAccount(context: Context, isp: String, zone: String = "Okara"): Pair<String, String>? {
+            val arr = safeAccountsArray(context, zone) ?: return null
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (!obj.optBoolean("isEnabled", true)) continue
-                    val isActuallyDealer = obj.optBoolean("isDealer", false) || obj.optString("dealerName", "").isNotBlank()
-                    if (obj.optString("isp").equals(isp, ignoreCase = true) && isActuallyDealer) {
+                    val isDealer = obj.optBoolean("isDealer", false) || obj.optString("dealerName", "").isNotBlank()
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) && isDealer) {
                         val u = obj.optString("username", "")
                         val p = obj.optString("password", "")
                         if (u.isNotBlank() && p.isNotBlank()) return Pair(u, p)
                     }
                 } catch (_: Exception) { }
             }
-
-            // Pass 5: Any enabled account matching ISP
-            for (i in 0 until arr.length()) {
-                try {
-                    val obj = arr.getJSONObject(i)
-                    if (!obj.optBoolean("isEnabled", true)) continue
-                    if (obj.optString("isp").equals(isp, ignoreCase = true)) {
-                        val u = obj.optString("username", "")
-                        val p = obj.optString("password", "")
-                        if (u.isNotBlank() && p.isNotBlank()) return Pair(u, p)
-                    }
-                } catch (_: Exception) { }
-            }
-
             return null
         }
 
@@ -286,7 +240,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         }
 
         fun getSavedUrl(context: Context, isp: String, zone: String = "Okara"): String? {
-            val arr = safeAccountsArray(context) ?: return null
+            val arr = safeAccountsArray(context, zone) ?: return null
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
@@ -312,7 +266,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         }
 
         fun getDealerUsername(context: Context, isp: String, zone: String, dealerName: String): String? {
-            val arr = safeAccountsArray(context) ?: return null
+            val arr = safeAccountsArray(context, zone) ?: return null
             // Pass 1: Exact match on ISP + DealerName + Zone (isDealer = true)
             for (i in 0 until arr.length()) {
                 try {
@@ -357,7 +311,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         }
 
         fun getDealerPassword(context: Context, isp: String, zone: String, dealerName: String): String? {
-            val arr = safeAccountsArray(context) ?: return null
+            val arr = safeAccountsArray(context, zone) ?: return null
             // Pass 1: Exact match on ISP + DealerName + Zone (isDealer = true)
             for (i in 0 until arr.length()) {
                 try {
@@ -439,8 +393,17 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             if (!zone.isNullOrBlank()) {
                 val cleanZone = zone.trim().lowercase().replace("-", "_")
                 val cleanCompId = zone.trim().uppercase()
+                val canonicalCompId = CompanyDataHelper.getCanonicalDocId(zone)
+
                 parseAndMerge(getPrefsForCompany(context, cleanCompId).getString(KEY_ACCOUNTS, null))
+                parseAndMerge(getPrefsForCompany(context, canonicalCompId).getString(KEY_ACCOUNTS, null))
                 parseAndMerge(getPrefsForCompany(context, zone).getString(KEY_ACCOUNTS, null))
+
+                if (cleanCompId.contains("DEO") || cleanCompId.contains("DEP")) {
+                    parseAndMerge(getPrefsForCompany(context, "DEP-001").getString(KEY_ACCOUNTS, null))
+                    parseAndMerge(getPrefsForCompany(context, "DEP").getString(KEY_ACCOUNTS, null))
+                    parseAndMerge(getPrefsForCompany(context, "DEO-001").getString(KEY_ACCOUNTS, null))
+                }
 
                 // Also check local zone-scoped files (ebill, wateen, zong, jazz)
                 listOf("ebill_accounts_$cleanZone", "wateen_accounts_$cleanZone", "zong_accounts_$cleanZone", "jazz_accounts_$cleanZone").forEach { pName ->
@@ -458,6 +421,64 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             parseAndMerge(getPrefs(context).getString(KEY_ACCOUNTS, null))
 
             return if (resultArr.length() > 0) resultArr else null
+        }
+
+        @JvmStatic
+        fun autoSyncCloudAccountsToLocal(context: Context, onComplete: (() -> Unit)? = null) {
+            FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+                .getReference("isp_panel_accounts").get()
+                .addOnSuccessListener { snapshot ->
+                    if (snapshot != null && snapshot.exists()) {
+                        for (child in snapshot.children) {
+                            val compKey = child.key ?: continue
+                            val jsonStr = child.child("accounts_json").getValue(String::class.java) ?: continue
+                            if (jsonStr.isNotBlank()) {
+                                try {
+                                    val remoteAccounts = JSONObject(jsonStr)
+                                    val cleanCompId = compKey.trim().uppercase()
+                                    getPrefsForCompany(context, cleanCompId)
+                                        .edit().putString(KEY_ACCOUNTS, remoteAccounts.toString()).apply()
+
+                                    val canonicalCompId = CompanyDataHelper.getCanonicalDocId(cleanCompId)
+                                    if (canonicalCompId != cleanCompId) {
+                                        getPrefsForCompany(context, canonicalCompId)
+                                            .edit().putString(KEY_ACCOUNTS, remoteAccounts.toString()).apply()
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("IspPanelSettings", "Error caching cloud accounts for $compKey", e)
+                                }
+                            }
+                        }
+                    }
+                    onComplete?.invoke()
+                }
+                .addOnFailureListener {
+                    FirebaseFirestore.getInstance().collection("ispPanelAccounts").get()
+                        .addOnSuccessListener { firestoreSnap ->
+                            for (doc in firestoreSnap.documents) {
+                                val compKey = doc.id
+                                val jsonStr = doc.getString("accounts_json") ?: continue
+                                if (jsonStr.isNotBlank()) {
+                                    try {
+                                        val remoteAccounts = JSONObject(jsonStr)
+                                        val cleanCompId = compKey.trim().uppercase()
+                                        getPrefsForCompany(context, cleanCompId)
+                                            .edit().putString(KEY_ACCOUNTS, remoteAccounts.toString()).apply()
+
+                                        val canonicalCompId = CompanyDataHelper.getCanonicalDocId(cleanCompId)
+                                        if (canonicalCompId != cleanCompId) {
+                                            getPrefsForCompany(context, canonicalCompId)
+                                                .edit().putString(KEY_ACCOUNTS, remoteAccounts.toString()).apply()
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                            onComplete?.invoke()
+                        }
+                        .addOnFailureListener {
+                            onComplete?.invoke()
+                        }
+                }
         }
 
         fun debugListAccounts(context: Context): String {
@@ -620,15 +641,17 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             btnReset?.setOnClickListener { showResetDefaultsConfirmDialog() }
         }
 
+        val activeComp = SessionManager(this).getActiveCompanyId()
+            ?: CompanyDataHelper.getCurrentCompanyId(this)
+            ?: "DEP-001"
+
         if (isSuper) {
             filterCardLayout?.visibility = View.VISIBLE
             setupCompanyFilterSpinner()
-            loadAccountsUI(null)
+            loadAccountsUI(activeComp)
         } else {
             filterCardLayout?.visibility = View.GONE
-            val session = SessionManager(this)
-            val userComp = session.getCompanyId() ?: CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
-            loadAccountsUI(userComp)
+            loadAccountsUI(activeComp)
         }
 
         syncLocalAccountsToCloudWithFeedback(false)
@@ -694,8 +717,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         val activeCompRaw = SessionManager(this).getActiveCompanyId() ?: currentCompRaw
 
         val filterList = LinkedHashSet<String>()
-        filterList.add("ALL (Active: $activeCompRaw)")
-        formatCleanCompanyId(activeCompRaw)?.let { filterList.add(it) }
+        val cleanActive = formatCleanCompanyId(activeCompRaw) ?: activeCompRaw
+        filterList.add(cleanActive)
+        filterList.add("ALL")
         formatCleanCompanyId(currentCompRaw)?.let { filterList.add(it) }
 
         FirebaseFirestore.getInstance().collection("franchiseSettings").get().addOnSuccessListener { snapshot ->
@@ -1185,18 +1209,6 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         syncAccountsToFirebase(cleanCompId, json)
     }
 
-    private fun hasIspInAccounts(json: JSONObject, isp: String): Boolean {
-        val keys = json.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val obj = json.optJSONObject(k)
-            if (obj != null && obj.optString("isp").equals(isp, ignoreCase = true)) {
-                return true
-            }
-        }
-        return false
-    }
-
     private fun syncAccountsToFirebase(companyId: String, accountsJson: JSONObject) {
         val cleanCompId = formatCleanCompanyId(companyId) ?: companyId
         val jsonStr = accountsJson.toString()
@@ -1214,38 +1226,16 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         firestore.collection("ispPanelAccounts")
             .document(cleanCompId)
             .set(map, SetOptions.merge())
-
-        // Auto-link with Franchise Settings for Dealer Panel visibility across all document ID variants
-        val cleanComp = cleanCompId.trim().uppercase()
-        val docId = CompanyDataHelper.getCanonicalDocId(cleanComp)
-        val noHyphenId = cleanComp.replace("-", "")
-
-        val idsToUpdate = setOf(cleanComp, docId, noHyphenId).filter { it.isNotBlank() }
-
-        idsToUpdate.forEach { id ->
-            val ref = firestore.collection("franchiseSettings").document(id)
-            ref.get().addOnSuccessListener { snapshot ->
-                val existingMap = mutableMapOf<String, Boolean>()
-                (snapshot.get("enabledCompanies") as? Map<*, *>)?.forEach { (k, v) ->
-                    if (k != null && v is Boolean) existingMap[k.toString()] = v
-                }
-                existingMap["EBONE"] = hasIspInAccounts(accountsJson, "EBONE")
-                existingMap["WATEEN"] = hasIspInAccounts(accountsJson, "WATEEN")
-                existingMap["ZONG"] = hasIspInAccounts(accountsJson, "ZONG")
-                existingMap["JAZZ"] = hasIspInAccounts(accountsJson, "JAZZ")
-
-                val updateData = mapOf(
-                    "enabledCompanies" to existingMap,
-                    "cityName" to cleanComp
-                )
-                ref.set(updateData, SetOptions.merge())
-            }
-        }
     }
 
     private fun formatCleanCompanyId(raw: String): String? {
         val clean = raw.trim().uppercase()
         if (clean == "BALANCES" || clean == "DEFAULT" || clean == "ALL") return null
+
+        val canonical = CompanyDataHelper.getCanonicalDocId(clean)
+        if (canonical.isNotBlank() && CompanyDataHelper.isValidCompanyId(canonical)) {
+            return canonical
+        }
 
         if (clean.matches(Regex("^[A-Z]{2,5}-\\d{3}$"))) {
             return clean

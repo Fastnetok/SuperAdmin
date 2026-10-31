@@ -92,15 +92,7 @@ object FranchiseBalanceManager {
     }
 
     fun checkAndNotifyLowBalance(context: Context, panel: String, balance: Double, zone: String = "Okara") {
-        getDoc(context, zone).get().addOnSuccessListener { snapshot ->
-            val zoneThreshold = snapshot.getDouble(thresholdField(panel, zone))
-            val baseThreshold = snapshot.getDouble("${panelKey(panel)}LowBalanceThreshold")
-            val threshold = zoneThreshold ?: baseThreshold ?: return@addOnSuccessListener
-            if (threshold <= 0.0) return@addOnSuccessListener
-            if (balance < threshold) {
-                showLowBalanceNotification(context, panel, zone, balance, threshold)
-            }
-        }
+        // Disabled per user request: No Threshold notifications.
     }
 
     private fun showLowBalanceNotification(context: Context, panel: String, zone: String, balance: Double, threshold: Double) {

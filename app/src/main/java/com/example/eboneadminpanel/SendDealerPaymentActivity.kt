@@ -62,6 +62,7 @@ class SendDealerPaymentActivity : AppCompatActivity() {
     private var prefillAmount: String? = null
     private var prefillTransactionId: String? = null
 
+    private lateinit var searchDealerInput: EditText
     private lateinit var dealerSpinner: Spinner
     private lateinit var companySpinner: Spinner
     private lateinit var amountInput: EditText
@@ -114,32 +115,33 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             setPadding(0, 0, dp(12), 0)
             setOnClickListener { finish() }
         })
+        val activeComp = CompanyDataHelper.getCurrentCompanyId(this) ?: "DEP-001"
+        val cleanComp = CompanyDataHelper.getCanonicalDocId(activeComp)
+
         headerRow.addView(TextView(this).apply {
-            text = if (isPrefilled) "Confirm Payment" else "Send Dealer Payment"
+            text = if (isPrefilled) "Confirm Payment ($cleanComp)" else "Send Payment ($cleanComp)"
             textSize = 20f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(textDark)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
         
-        // Vibrant, authentic Dealer Reports button (👥 Reports 📊)
+        // Reports button — light grey background with bold black text
         val reportBtn = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(dp(12), dp(8), dp(14), dp(8))
-            background = GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.parseColor("#2563EB"), Color.parseColor("#1D4ED8"))
-            ).apply {
-                cornerRadius = dp(20).toFloat()
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#E5E7EB"))
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.parseColor("#D1D5DB"))
             }
-            elevation = dp(3).toFloat()
 
             addView(TextView(this@SendDealerPaymentActivity).apply {
-                text = "👥 Reports 📊"
-                textSize = 12f
+                text = "Reports 📊"
+                textSize = 13f
                 setTypeface(null, android.graphics.Typeface.BOLD)
-                setTextColor(Color.WHITE)
+                setTextColor(textDark)
             })
 
             setOnClickListener {
@@ -167,6 +169,28 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             setPadding(dp(4), dp(4), dp(4), dp(16))
         }
         root.addView(prefillSummary)
+
+        // NEW: Search Dealer Input with Magnifying Glass Icon
+        root.addView(fieldLabel("Search Dealer"))
+        searchDealerInput = EditText(this).apply {
+            hint = "🔍 Search dealer by name, code or mobile..."
+            textSize = 13f
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), borderLight)
+            }
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    filterDealersList(s?.toString().orEmpty())
+                }
+                override fun afterTextChanged(s: android.text.Editable?) {}
+            })
+        }
+        root.addView(searchDealerInput)
+        root.addView(spacer(12))
 
         root.addView(fieldLabel("Dealer"))
         dealerSpinner = Spinner(this)
@@ -247,6 +271,11 @@ class SendDealerPaymentActivity : AppCompatActivity() {
     }
 
     private fun updateDealerDropdownForSelectedCompany() {
+        val currentQuery = if (::searchDealerInput.isInitialized) searchDealerInput.text.toString() else ""
+        filterDealersList(currentQuery)
+    }
+
+    private fun filterDealersList(query: String) {
         val selectedPanel = companies.getOrNull(selectedCompanyIndex)?.uppercase() ?: "EBONE"
         val fieldName = when (selectedPanel) {
             "EBONE" -> "eboneDealerId"
@@ -256,18 +285,27 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             else -> "eboneDealerId"
         }
 
-        val filteredDealers = allDealers.filter { doc ->
+        val q = query.trim().lowercase()
+        val filtered = allDealers.filter { doc ->
             val ispId = doc.getString(fieldName)?.trim().orEmpty()
-            ispId.isNotBlank()
+            if (ispId.isBlank()) return@filter false
+            if (q.isBlank()) return@filter true
+
+            val name = (doc.getString("name") ?: doc.id).lowercase()
+            val code = (doc.getString("dealerCode") ?: doc.getString("code") ?: "").lowercase()
+            val phone = (doc.getString("mobile") ?: doc.getString("phone") ?: "").lowercase()
+            val zone = (doc.getString("zone") ?: "").lowercase()
+
+            name.contains(q) || code.contains(q) || phone.contains(q) || zone.contains(q) || ispId.lowercase().contains(q)
         }
 
-        dealers = filteredDealers
+        dealers = filtered
 
-        if (filteredDealers.isEmpty()) {
+        if (filtered.isEmpty()) {
             selectedDealerIndex = -1
-            dealerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("No dealers created for $selectedPanel"))
+            dealerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("No matching dealers found"))
         } else {
-            val names = filteredDealers.map { doc ->
+            val names = filtered.map { doc ->
                 val name = doc.getString("name") ?: doc.id
                 val zone = doc.getString("zone")?.ifBlank { null } ?: "Okara"
                 "$name ($zone)"
@@ -285,28 +323,50 @@ class SendDealerPaymentActivity : AppCompatActivity() {
     }
 
     private fun loadDealers() {
-        db.collection("dealers").orderBy("name").get()
+        // Step 1: Load INSTANTLY from local disk cache (1 millisecond response!)
+        db.collection("dealers").orderBy("name").get(com.google.firebase.firestore.Source.CACHE)
             .addOnSuccessListener { snapshot ->
-                allDealers = snapshot.documents.filter { doc ->
-                    CompanyDataHelper.belongsToCurrentCompany(this@SendDealerPaymentActivity, doc)
+                if (snapshot != null && !snapshot.isEmpty) {
+                    processLoadedDealersSnapshot(snapshot)
                 }
-                updateDealerDropdownForSelectedCompany()
+                fetchLatestDealersFromNetwork()
+            }
+            .addOnFailureListener {
+                fetchLatestDealersFromNetwork()
+            }
+    }
 
-                if (isPrefilled) {
-                    val idx = dealers.indexOfFirst { it.id == prefillDealerId }
-                    if (idx >= 0) {
-                        dealerSpinner.setSelection(idx)
-                        selectedDealerIndex = idx
-                        val doc = dealers[idx]
-                        val zone = doc.getString("zone")?.ifBlank { null } ?: "Okara"
-                        prefillSummary.visibility = View.VISIBLE
-                        prefillSummary.text = "${doc.getString("name") ?: "Dealer"} ($zone)  •  ${(prefillPanel ?: "").uppercase()}  •  Rs. ${prefillAmount ?: "?"}"
-                    }
+    private fun fetchLatestDealersFromNetwork() {
+        db.collection("dealers").orderBy("name").get(com.google.firebase.firestore.Source.DEFAULT)
+            .addOnSuccessListener { snapshot ->
+                if (snapshot != null) {
+                    processLoadedDealersSnapshot(snapshot)
                 }
             }
             .addOnFailureListener { e ->
-                statusText.text = "Could not load dealers: ${e.message}"
+                if (allDealers.isEmpty()) {
+                    statusText.text = "Could not load dealers: ${e.message}"
+                }
             }
+    }
+
+    private fun processLoadedDealersSnapshot(snapshot: com.google.firebase.firestore.QuerySnapshot) {
+        allDealers = snapshot.documents.filter { doc ->
+            CompanyDataHelper.belongsToCurrentCompany(this@SendDealerPaymentActivity, doc)
+        }
+        updateDealerDropdownForSelectedCompany()
+
+        if (isPrefilled) {
+            val idx = dealers.indexOfFirst { it.id == prefillDealerId }
+            if (idx >= 0) {
+                dealerSpinner.setSelection(idx)
+                selectedDealerIndex = idx
+                val doc = dealers[idx]
+                val zone = doc.getString("zone")?.ifBlank { null } ?: "Okara"
+                prefillSummary.visibility = View.VISIBLE
+                prefillSummary.text = "${doc.getString("name") ?: "Dealer"} ($zone)  •  ${(prefillPanel ?: "").uppercase()}  •  Rs. ${prefillAmount ?: "?"}"
+            }
+        }
     }
 
     private fun onSendClicked() {

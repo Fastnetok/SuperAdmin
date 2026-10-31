@@ -25,22 +25,22 @@ object CityPermissionManager {
         val sessionMgr = SessionManager(context)
         val rawZone = if (zone.isNotBlank() && zone.uppercase() != "ALL") zone else (sessionMgr.getActiveCompanyId() ?: sessionMgr.getCompanyId() ?: "OKARA")
         val targetZone = rawZone.trim().uppercase()
+        val canonicalDocId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(targetZone)
         val prefs = getCachePrefs(context)
-        val cacheKey = "${targetZone}_company_$companyName"
+        val cacheKey = "${canonicalDocId}_company_$companyName"
 
-        val cachedValue = if (prefs.contains(cacheKey)) {
-            prefs.getBoolean(cacheKey, false)
-        } else {
-            false
+        var initialCalled = false
+        if (prefs.contains(cacheKey)) {
+            val cachedValue = prefs.getBoolean(cacheKey, false)
+            callback(cachedValue)
+            initialCalled = true
         }
-        callback(cachedValue)
 
         checkPermission(context, zone, companyName, true) { isEnabled ->
-            if (cachedValue != isEnabled) {
-                prefs.edit().putBoolean(cacheKey, isEnabled).apply()
+            val prev = prefs.getBoolean(cacheKey, !isEnabled)
+            prefs.edit().putBoolean(cacheKey, isEnabled).apply()
+            if (!initialCalled || prev != isEnabled) {
                 callback(isEnabled)
-            } else {
-                prefs.edit().putBoolean(cacheKey, isEnabled).apply()
             }
         }
     }

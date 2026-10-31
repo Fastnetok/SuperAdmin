@@ -184,9 +184,9 @@ class AutoResolveWorker(context: Context, params: WorkerParameters) : CoroutineW
             else -> "https://partner.ebill.pk/clients"
         }
         val searchSelector = when {
-            isp.startsWith("WATEEN") -> "input[aria-controls=\"allonlineUsers\"]"
-            isp.startsWith("ZONG") -> "input[aria-controls=\"onlinecustomers\"]"
-            else -> "input[aria-controls=\"example1\"]"
+            isp.startsWith("WATEEN") -> "input[aria-controls=\"userListOnline\"], input[aria-controls=\"allonlineUsers\"], .dataTables_filter input, input[type=search]"
+            isp.startsWith("ZONG") -> "input[aria-controls=\"onlinecustomers\"], .dataTables_filter input, input[type=search]"
+            else -> "input[aria-controls=\"example1\"], .dataTables_filter input, input[type=search]"
         }
 
         handler.post {

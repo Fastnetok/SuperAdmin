@@ -679,22 +679,32 @@ class DealerPanelActivity : AppCompatActivity() {
             setPadding(0, dp(10), 0, 0)
         }
         var addedAny = false
-        if (eboneId.isNotBlank() || ebone != 0.0) {
+        if (ebone > 0 || eboneId.isNotBlank()) {
             badgeRow.addView(networkBalanceBadge("Ebone", ebone, orange))
             addedAny = true
         }
-        if (wateenId.isNotBlank() || wateen != 0.0) {
+        if (wateen > 0 || wateenId.isNotBlank()) {
             if (addedAny) badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
             badgeRow.addView(networkBalanceBadge("Wateen", wateen, navyMid))
             addedAny = true
         }
-        if (zongId.isNotBlank() || zong != 0.0) {
+        if (zong > 0 || zongId.isNotBlank()) {
             if (addedAny) badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
             badgeRow.addView(networkBalanceBadge("Zong", zong, purple))
             addedAny = true
         }
-        if (jazzId.isNotBlank() || jazz != 0.0) {
+        if (jazz > 0 || jazzId.isNotBlank()) {
             if (addedAny) badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            badgeRow.addView(networkBalanceBadge("Jazz", jazz, Color.parseColor("#E11D48")))
+            addedAny = true
+        }
+        if (!addedAny) {
+            badgeRow.addView(networkBalanceBadge("Ebone", ebone, orange))
+            badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            badgeRow.addView(networkBalanceBadge("Wateen", wateen, navyMid))
+            badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            badgeRow.addView(networkBalanceBadge("Zong", zong, purple))
+            badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
             badgeRow.addView(networkBalanceBadge("Jazz", jazz, Color.parseColor("#E11D48")))
             addedAny = true
         }
@@ -757,6 +767,26 @@ class DealerPanelActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun dealerIdBadge(label: String, dealerId: String, accent: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = outlinedPill(Color.parseColor("#F9FAFB"), borderLight, 8)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = label
+                textSize = 10f
+                setTextColor(accent)
+                setTypeface(null, Typeface.BOLD)
+            })
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = "ID: $dealerId"
+                textSize = 12f
+                setTextColor(textDark)
+                setTypeface(null, Typeface.BOLD)
+            })
+        }
+
     private fun networkBalanceBadge(label: String, amount: Double, accent: Int): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -770,7 +800,7 @@ class DealerPanelActivity : AppCompatActivity() {
                 setTypeface(null, Typeface.BOLD)
             })
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "Rs. ${"%.0f".format(amount)}"
+                text = "Rs. ${"%,.0f".format(amount)}"
                 textSize = 13f
                 setTextColor(textDark)
                 setTypeface(null, Typeface.BOLD)
@@ -1271,24 +1301,6 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun launchCheckBalance(isp: String, zone: String) {
-        if (isBackgroundMode) {
-            showStatusNotification("Checking $isp Balance...", "$zone پینل سے بیلنس پڑھا جا رہا ہے")
-            BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
-                runOnUiThread {
-                    if (balance != null) {
-                        // SAVE balance to Firebase so chips update
-                        FranchiseBalanceManager.updateBalance(this, isp, balance, zone) {
-                            FranchiseBalanceManager.showUpdateNotification(this, isp, balance, zone)
-                        }
-                    } else {
-                        showStatusNotification("$isp Update Failed", "بیلنس چیک کرنے میں دشواری پیش آئی")
-                    }
-                    if (isAutoUpdating) processNextAutoUpdate()
-                }
-            }
-            return
-        }
-
         val targetActivity = WebViewRouter.getTargetActivity(isp, zone)
         val intent = Intent(this, targetActivity).apply {
             putExtra("selected_isp", isp)
@@ -1406,7 +1418,6 @@ class DealerPanelActivity : AppCompatActivity() {
         val isp = next.first
         val zone = next.second
 
-        showStatusNotification("Checking $isp Balance...", "$zone پینل سے بیلنس پڑھا جا رہا ہے")
         BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
             runOnUiThread {
                 if (balance != null) {
@@ -1473,22 +1484,10 @@ class DealerPanelActivity : AppCompatActivity() {
     private fun renderEmptyBalances() {
         franchiseBalancesRow.removeAllViews()
         franchiseBalancesRow.addView(emptyState("No balance data found"))
-        franchiseBalancesRow.addView(autoUpdateChip())
     }
 
     private fun processBalanceSnapshot(snapshot: DocumentSnapshot) {
         val enabledMap = snapshot.get("enabledCompanies") as? Map<*, *>
-
-        val enabledFeatures = snapshot.get("enabledFeatures") as? Map<*, *>
-        val dealerWebviewEnabled = if (enabledFeatures != null) {
-            val key = enabledFeatures.keys.find { it.toString().trim().lowercase().contains("webview") }
-            if (key != null) (enabledFeatures[key] as? Boolean) ?: false else false
-        } else {
-            false
-        }
-        if (!dealerWebviewEnabled) {
-            isBackgroundMode = true
-        }
 
         franchiseBalancesRow.removeAllViews()
         val cityName = snapshot.getString("cityName")?.trim()?.takeIf { it.isNotBlank() } ?: CompanyDataHelper.getCurrentCompanyId(this) ?: "Franchise"
@@ -1514,10 +1513,6 @@ class DealerPanelActivity : AppCompatActivity() {
                     "JAZZ" -> franchiseBalancesRow.addView(franchiseBalanceChip("Jazz", jazz, Color.parseColor("#E11D48"), "JAZZ", cityName, jazzTh))
                 }
             }
-        }
-        franchiseBalancesRow.addView(autoUpdateChip())
-        if (dealerWebviewEnabled) {
-            franchiseBalancesRow.addView(updateModeChip())
         }
 
         lastDealerQuery?.let { renderDealers(it) }
@@ -1559,8 +1554,6 @@ class DealerPanelActivity : AppCompatActivity() {
             })
             setOnClickListener {
                 launchCheckBalance(isp, zone)
-                val status = if(isLow) "LOW" else "OK"
-                Toast.makeText(context, "$label $zone: Rs. ${absValue.toInt()} (Limit: ${safeThreshold.toInt()}) [$status]", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -2025,39 +2018,30 @@ class DealerPanelActivity : AppCompatActivity() {
         }
     }
 
+    private data class DealerLedgerItem(val type: String, val panel: String, val amount: Double, val date: Long)
+
     private fun loadLedgerForRange(dealerId: String, container: LinearLayout, start: Long, end: Long) {
         container.removeAllViews()
         container.addView(ProgressBar(this).apply { layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).also { it.gravity = Gravity.CENTER } })
 
         val df = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
-        
-        // Data class for merged records
-        data class LedgerEntry(val type: String, val panel: String, val amount: Double, val date: Long)
-        val allEntries = mutableListOf<LedgerEntry>()
+        val allEntries = mutableListOf<DealerLedgerItem>()
 
         val tasks = mutableListOf<Task<QuerySnapshot>>()
         
         // 1. dealerPayments
         tasks.add(db.collection("dealerPayments")
             .whereEqualTo("dealerId", dealerId)
-            .whereGreaterThanOrEqualTo("submittedAt", start)
-            .whereLessThanOrEqualTo("submittedAt", end)
             .get())
 
-        // 2. dealerTransactions (Completed ones)
+        // 2. dealerTransactions
         tasks.add(db.collection("dealerTransactions")
             .whereEqualTo("dealerId", dealerId)
-            .whereEqualTo("status", "COMPLETED")
-            .whereGreaterThanOrEqualTo("submittedAt", start)
-            .whereLessThanOrEqualTo("submittedAt", end)
             .get())
 
         // 3. paymentClaims (Dealer claims)
         tasks.add(db.collection("paymentClaims")
             .whereEqualTo("ownerId", dealerId)
-            .whereEqualTo("ownerType", "DEALER")
-            .whereGreaterThanOrEqualTo("submittedAt", start)
-            .whereLessThanOrEqualTo("submittedAt", end)
             .get())
 
         Tasks.whenAllComplete(tasks).addOnSuccessListener {
@@ -2066,18 +2050,35 @@ class DealerPanelActivity : AppCompatActivity() {
             tasks.forEachIndexed { index, task ->
                 if (task.isSuccessful) {
                     task.result?.documents?.forEach { doc ->
-                        val amt = doc.getDouble("amount") ?: 0.0
-                        val date = doc.getLong("submittedAt") ?: 0L
-                        val type = when(index) {
-                            0 -> "Payment"
-                            1 -> "Txn"
-                            else -> "Claim"
+                        val date = doc.getLong("submittedAt")
+                            ?: doc.getLong("timestamp")
+                            ?: doc.getLong("createdAt")
+                            ?: 0L
+                        
+                        if (date in start..end) {
+                            val amt = doc.getDouble("amount") ?: 0.0
+                            val status = doc.getString("status") ?: "COMPLETED"
+                            val ownerType = doc.getString("ownerType") ?: "DEALER"
+
+                            if (index == 1 && status != "COMPLETED" && status != "VERIFIED") {
+                                // Skip non-completed transactions
+                                return@forEach
+                            }
+                            if (index == 2 && !ownerType.equals("DEALER", ignoreCase = true)) {
+                                return@forEach
+                            }
+
+                            val type = when(index) {
+                                0 -> "Payment"
+                                1 -> "Txn"
+                                else -> "Claim"
+                            }
+                            val panel = when(index) {
+                                2 -> doc.getString("paymentSource") ?: ""
+                                else -> doc.getString("panel") ?: ""
+                            }
+                            allEntries.add(DealerLedgerItem(type, panel, amt, date))
                         }
-                        val panel = when(index) {
-                            2 -> doc.getString("paymentSource") ?: ""
-                            else -> doc.getString("panel") ?: ""
-                        }
-                        allEntries.add(LedgerEntry(type, panel, amt, date))
                     }
                 }
             }

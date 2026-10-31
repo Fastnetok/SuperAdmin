@@ -119,6 +119,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity android:name=".CustomerBillingActivity" android:exported="false" />
+        <activity android:name=".QuickCustomerRechargeActivity" android:exported="false" />
+        <activity android:name=".CustomerRechargeEboneWebViewActivity" android:exported="false" />
+        <activity android:name=".CustomerRechargeWateenWebViewActivity" android:exported="false" />
+        <activity android:name=".CustomerRechargeZongWebViewActivity" android:exported="false" />
+        <activity android:name=".CustomerRechargeJazzWebViewActivity" android:exported="false" />
 
         <activity
             android:name=".ReliefPackageActivity"

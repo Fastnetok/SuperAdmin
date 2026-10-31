@@ -497,23 +497,42 @@ class CityFranchiseManagementActivity : AppCompatActivity() {
         val data = mapOf(
             "enabledCompanies" to companiesMap,
             "enabledFeatures" to featuresMapToSave,
-            "cityName" to city
+            "cityName" to city,
+            "updatedAt" to System.currentTimeMillis()
         )
 
         val cleanId = city.trim().uppercase()
         val noHyphenId = cleanId.replace("-", "")
         val canonicalId = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(cleanId)
 
+        val idsToUpdate = LinkedHashSet<String>().apply {
+            add(cleanId)
+            add(noHyphenId)
+            add(canonicalId)
+            if (cleanId.contains("DEP") || cleanId.contains("DEO")) {
+                add("DEP-001")
+                add("DEO-001")
+                add("DEP-DOUBLE")
+                add("DEPDOUBLE")
+                add("DEP")
+                add("DEO")
+            }
+        }.filter { it.isNotBlank() }
+
         val batch = db.batch()
-        batch.set(db.collection("franchiseSettings").document(cleanId), data, SetOptions.merge())
-        batch.set(db.collection("franchiseSettings").document(noHyphenId), data, SetOptions.merge())
-        if (canonicalId != cleanId && canonicalId != noHyphenId) {
-            batch.set(db.collection("franchiseSettings").document(canonicalId), data, SetOptions.merge())
+        idsToUpdate.forEach { id ->
+            batch.set(db.collection("franchiseSettings").document(id), data, SetOptions.merge())
         }
 
         batch.commit().addOnSuccessListener {
+            // Also sync to Realtime Database for zero-latency cross-device live updates
+            val rtdb = com.google.firebase.database.FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+            idsToUpdate.forEach { id ->
+                rtdb.getReference("franchise_settings").child(id).setValue(data)
+            }
+
             CityPermissionManager.clearCache(this)
-            Toast.makeText(this, "Permissions saved successfully for $city", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Permissions PERMANENTLY saved for $city", Toast.LENGTH_SHORT).show()
         }.addOnFailureListener { e ->
             Toast.makeText(this, "Error saving: ${e.message}", Toast.LENGTH_SHORT).show()
         }

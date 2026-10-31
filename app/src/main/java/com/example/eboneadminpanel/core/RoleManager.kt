@@ -1,5 +1,6 @@
 package com.example.superadmin.core
 
+import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -82,12 +83,21 @@ object RoleManager {
         }
     }
 
-    fun checkCurrentUserRole(callback: RoleCheckCallback) {
+    fun checkCurrentUserRole(context: Context? = null, callback: RoleCheckCallback) {
         val user = auth.currentUser
         val uid = user?.uid
         val email = user?.email?.trim()?.lowercase()
 
         if (uid == null || email.isNullOrBlank()) {
+            if (context != null) {
+                val sessionMgr = SessionManager(context)
+                if (sessionMgr.isLoggedIn()) {
+                    val savedRole = sessionMgr.getUserRole() ?: Constants.ROLE_EMPLOYEE
+                    val savedCompanyId = sessionMgr.getCompanyId()
+                    callback.onRoleFound(savedRole, savedCompanyId)
+                    return
+                }
+            }
             callback.onError("User logged in nahi hai")
             return
         }

@@ -63,6 +63,192 @@ class AddEmployeeActivity : AppCompatActivity() {
     private val allManageItems = mutableListOf<ManageItem>()
     private val availableCompanies = mutableListOf<CompanyRef>()
 
+    private var cachedMaxManagers = 2
+    private var cachedMaxSupervisors = 3
+    private var cachedMaxEmployees = 20
+    private var cachedMaxDealers = 10
+    private var cachedMaxCustomers = 100
+
+    private var currentManagerCount = 0
+    private var currentSupervisorCount = 0
+    private var currentEmployeeCount = 0
+    private var currentDealerCount = 0
+    private var currentCustomerCount = 0
+
+    private fun setupRoleAndCompanyListeners() {
+        val listener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                refreshCompanyLimitsAndCounts()
+            }
+
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+        binding.spinnerCompany.onItemSelectedListener = listener
+        binding.spinnerRole.onItemSelectedListener = listener
+    }
+
+    private fun refreshCompanyLimitsAndCounts(onComplete: (() -> Unit)? = null) {
+        val selectedComp = availableCompanies.getOrNull(binding.spinnerCompany.selectedItemPosition)
+            ?: availableCompanies.firstOrNull()
+        val companyId = selectedComp?.id.orEmpty()
+        if (companyId.isBlank() || companyId == "DEFAULT") {
+            binding.tvNotificationBadge.visibility = View.GONE
+            onComplete?.invoke()
+            return
+        }
+
+        FirebaseFirestore.getInstance().collection("companies").document(companyId).get()
+            .addOnSuccessListener { doc ->
+                if (doc.exists()) {
+                    cachedMaxManagers = doc.getLong("maxManagers")?.toInt() ?: 2
+                    cachedMaxSupervisors = doc.getLong("maxSupervisors")?.toInt() ?: 3
+                    cachedMaxEmployees = doc.getLong("maxEmployees")?.toInt() ?: 20
+                    cachedMaxDealers = doc.getLong("maxDealers")?.toInt() ?: 10
+                    cachedMaxCustomers = doc.getLong("maxCustomers")?.toInt() ?: 100
+                } else {
+                    cachedMaxManagers = 2
+                    cachedMaxSupervisors = 3
+                    cachedMaxEmployees = 20
+                    cachedMaxDealers = 10
+                    cachedMaxCustomers = 100
+                }
+
+                countStaffByRole(companyId) { mgr, sup, emp, dealer, cust ->
+                    currentManagerCount = mgr
+                    currentSupervisorCount = sup
+                    currentEmployeeCount = emp
+                    currentDealerCount = dealer
+                    currentCustomerCount = cust
+                    updateLimitsInfoUI()
+                    onComplete?.invoke()
+                }
+            }
+            .addOnFailureListener {
+                countStaffByRole(companyId) { mgr, sup, emp, dealer, cust ->
+                    currentManagerCount = mgr
+                    currentSupervisorCount = sup
+                    currentEmployeeCount = emp
+                    currentDealerCount = dealer
+                    currentCustomerCount = cust
+                    updateLimitsInfoUI()
+                    onComplete?.invoke()
+                }
+            }
+    }
+
+    private fun countStaffByRole(companyId: String, callback: (mgr: Int, sup: Int, emp: Int, dealer: Int, cust: Int) -> Unit) {
+        val ref = db.getReference("companies").child(companyId).child("employees")
+        ref.get().addOnSuccessListener { snap ->
+            val uniqueMap = mutableMapOf<String, String>()
+            for (child in snap.children) {
+                val r = child.child("role").getValue(String::class.java)?.lowercase(Locale.getDefault())
+                    ?: child.child("designation").getValue(String::class.java)?.lowercase(Locale.getDefault())
+                    ?: "employee"
+                val name = child.child("employeeName").getValue(String::class.java)
+                    ?: child.child("name").getValue(String::class.java)
+                    ?: ""
+                val phone = child.child("phoneNumber").getValue(String::class.java)
+                    ?: child.child("mobileNumber").getValue(String::class.java)
+                    ?: child.child("phone").getValue(String::class.java)
+                    ?: child.key
+                    ?: ""
+                if (name.isNotBlank() || phone.isNotBlank()) {
+                    val key = if (name.isNotBlank() && phone.isNotBlank()) "${name.lowercase(Locale.getDefault())}_$phone" else name.ifBlank { phone }
+                    uniqueMap[key] = r
+                }
+            }
+
+            var mgr = 0
+            var sup = 0
+            var emp = 0
+            var dealer = 0
+            var cust = 0
+            for ((_, r) in uniqueMap) {
+                when (r) {
+                    "manager" -> mgr++
+                    "supervisor" -> sup++
+                    "dealer" -> dealer++
+                    "customer", "super_customer", "supercustomer", "customer_id" -> cust++
+                    else -> emp++
+                }
+            }
+
+            // Also check customers collection in Firestore if companyId matches
+            FirebaseFirestore.getInstance().collection("customers")
+                .get()
+                .addOnSuccessListener { custSnap ->
+                    var firestoreCustCount = 0
+                    for (doc in custSnap.documents) {
+                        val docComp = doc.getString("companyId") ?: doc.getString("company") ?: doc.getString("zone")
+                        if (docComp != null && (docComp.equals(companyId, true) || docComp.equals(companyId.replace("-", ""), true))) {
+                            firestoreCustCount++
+                        }
+                    }
+                    val finalCustCount = maxOf(cust, firestoreCustCount)
+                    callback(mgr, sup, emp, dealer, finalCustCount)
+                }
+                .addOnFailureListener {
+                    callback(mgr, sup, emp, dealer, cust)
+                }
+        }.addOnFailureListener {
+            callback(0, 0, 0, 0, 0)
+        }
+    }
+
+    private fun updateLimitsInfoUI() {
+        val remMgr = (cachedMaxManagers - currentManagerCount).coerceAtLeast(0)
+        val remSup = (cachedMaxSupervisors - currentSupervisorCount).coerceAtLeast(0)
+        val remEmp = (cachedMaxEmployees - currentEmployeeCount).coerceAtLeast(0)
+        val remDlr = (cachedMaxDealers - currentDealerCount).coerceAtLeast(0)
+        val remCust = (cachedMaxCustomers - currentCustomerCount).coerceAtLeast(0)
+
+        val selectedRole = binding.spinnerRole.selectedItem?.toString()?.lowercase(Locale.getDefault()) ?: "employee"
+        val (cur, max) = when (selectedRole) {
+            "manager" -> currentManagerCount to cachedMaxManagers
+            "supervisor" -> currentSupervisorCount to cachedMaxSupervisors
+            "dealer" -> currentDealerCount to cachedMaxDealers
+            "customer", "supercustomer", "customer_id" -> currentCustomerCount to cachedMaxCustomers
+            else -> currentEmployeeCount to cachedMaxEmployees
+        }
+
+        val hasAnyFullQuota = remMgr == 0 || remSup == 0 || remEmp == 0 || remDlr == 0 || remCust == 0 || cur >= max
+        binding.tvNotificationBadge.visibility = if (hasAnyFullQuota) View.VISIBLE else View.GONE
+    }
+
+    private fun showLicenseQuotasDialog() {
+        val selectedComp = availableCompanies.getOrNull(binding.spinnerCompany.selectedItemPosition)
+            ?: availableCompanies.firstOrNull()
+        val compName = selectedComp?.name ?: "Selected Franchise"
+        val compId = selectedComp?.id ?: "N/A"
+
+        val remMgr = (cachedMaxManagers - currentManagerCount).coerceAtLeast(0)
+        val remSup = (cachedMaxSupervisors - currentSupervisorCount).coerceAtLeast(0)
+        val remEmp = (cachedMaxEmployees - currentEmployeeCount).coerceAtLeast(0)
+        val remDlr = (cachedMaxDealers - currentDealerCount).coerceAtLeast(0)
+        val remCust = (cachedMaxCustomers - currentCustomerCount).coerceAtLeast(0)
+
+        val mgrBadge = if (remMgr == 0) " ⚠️ (LIMIT FULL)" else ""
+        val supBadge = if (remSup == 0) " ⚠️ (LIMIT FULL)" else ""
+        val empBadge = if (remEmp == 0) " ⚠️ (LIMIT FULL)" else ""
+        val dlrBadge = if (remDlr == 0) " ⚠️ (LIMIT FULL)" else ""
+        val custBadge = if (remCust == 0) " ⚠️ (LIMIT FULL)" else ""
+
+        val message = "🏢 Company: $compName ($compId)\n\n" +
+                "👔 Managers: $currentManagerCount / $cachedMaxManagers Registered (Remaining: $remMgr)$mgrBadge\n\n" +
+                "🛡️ Supervisors: $currentSupervisorCount / $cachedMaxSupervisors Registered (Remaining: $remSup)$supBadge\n\n" +
+                "💼 Employees: $currentEmployeeCount / $cachedMaxEmployees Registered (Remaining: $remEmp)$empBadge\n\n" +
+                "🤝 Dealers: $currentDealerCount / $cachedMaxDealers Registered (Remaining: $remDlr)$dlrBadge\n\n" +
+                "👥 Customers: $currentCustomerCount / $cachedMaxCustomers Registered (Remaining: $remCust)$custBadge\n\n" +
+                "💡 Super Admin limits govern registration capacity for each role."
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("🔔 License & Quota Status")
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .setNeutralButton("Refresh Status") { _, _ -> refreshCompanyLimitsAndCounts() }
+            .show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityAddEmployeeBinding.inflate(layoutInflater)
@@ -70,13 +256,15 @@ class AddEmployeeActivity : AppCompatActivity() {
 
         generateNewPin()
 
-        val roles = arrayOf("employee", "manager", "supervisor", "dealer")
+        val roles = arrayOf("employee", "manager", "supervisor", "dealer", "customer")
         val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, roles)
         binding.spinnerRole.adapter = spinnerAdapter
 
+        setupRoleAndCompanyListeners()
         loadCompaniesForSpinner()
 
         binding.btnBack.setOnClickListener { finish() }
+        binding.btnNotificationContainer.setOnClickListener { showLicenseQuotasDialog() }
         binding.btnRegeneratePin.setOnClickListener { generateNewPin() }
         binding.btnSaveEmployee.setOnClickListener { saveEmployee() }
 
@@ -182,6 +370,7 @@ class AddEmployeeActivity : AppCompatActivity() {
                 binding.spinnerCompany.setSelection(0)
             }
         }
+        refreshCompanyLimitsAndCounts()
     }
 
     // ===================== ADD EMPLOYEE =====================
@@ -201,34 +390,58 @@ class AddEmployeeActivity : AppCompatActivity() {
 
         binding.btnSaveEmployee.isEnabled = false
 
-        val selectedComp = availableCompanies.getOrNull(binding.spinnerCompany.selectedItemPosition)
-            ?: availableCompanies.firstOrNull()
-            ?: CompanyRef("DEFAULT", "Default Company")
-        val companyId = selectedComp.id
-        val companyName = selectedComp.name
-        val cleanCompId = companyId.replace("-", "")
+        refreshCompanyLimitsAndCounts {
+            val selectedComp = availableCompanies.getOrNull(binding.spinnerCompany.selectedItemPosition)
+                ?: availableCompanies.firstOrNull()
+                ?: CompanyRef("DEFAULT", "Default Company")
+            val companyId = selectedComp.id
+            val companyName = selectedComp.name
+            val cleanCompId = companyId.replace("-", "")
 
-        val empRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("employees") else db.getReference("employees")
-        val pinRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("employeePins") else db.getReference("employeePins")
-        val appRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("ApprovedDevices") else db.getReference("ApprovedDevices")
+            val selectedRole = binding.spinnerRole.selectedItem.toString().lowercase(Locale.getDefault())
 
-        val cleanPhoneInput = phoneNumber.replace("+", "").replace("-", "").replace(" ", "")
-        val formattedPhoneInput = if (cleanPhoneInput.startsWith("0")) "+92" + cleanPhoneInput.substring(1) else if (!cleanPhoneInput.startsWith("92")) "+92$cleanPhoneInput" else "+$cleanPhoneInput"
-        val rawPhoneInput = if (cleanPhoneInput.startsWith("0")) cleanPhoneInput.substring(1) else if (cleanPhoneInput.startsWith("92")) cleanPhoneInput.substring(2) else cleanPhoneInput
+            // License Limit Check set by Super Admin
+            val (allowedLimit, existingCount) = when (selectedRole) {
+                "manager" -> cachedMaxManagers to currentManagerCount
+                "supervisor" -> cachedMaxSupervisors to currentSupervisorCount
+                "dealer" -> cachedMaxDealers to currentDealerCount
+                "customer", "super_customer", "supercustomer", "customer_id" -> cachedMaxCustomers to currentCustomerCount
+                else -> cachedMaxEmployees to currentEmployeeCount
+            }
 
-        // Check for existing name, phone, or PIN within this specific company to avoid duplicates
-        empRef.get().addOnSuccessListener { empSnap ->
-            pinRef.get().addOnSuccessListener { pinSnap ->
-                appRef.get().addOnSuccessListener { appSnap ->
-                    var duplicateReason = ""
+            if (existingCount >= allowedLimit) {
+                val roleTitle = selectedRole.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                showResult(
+                    "❌ License Limit Error: Super Admin limit of $allowedLimit $roleTitle(s) reached for Company '$companyName' ($companyId)!\n\n" +
+                            "📊 Registered: $existingCount / $allowedLimit | Remaining Quota: 0\n\n" +
+                            "💡 Limit full! You cannot add more $roleTitle(s). Please ask Super Admin to increase the $roleTitle license limit.",
+                    isError = true
+                )
+                binding.btnSaveEmployee.isEnabled = true
+                return@refreshCompanyLimitsAndCounts
+            }
 
-                    fun checkDuplicate(child: DataSnapshot): String? {
-                        val name = child.child("employeeName").getValue(String::class.java)
-                            ?: child.child("name").getValue(String::class.java)
-                        val phone = child.child("phoneNumber").getValue(String::class.java)
-                            ?: child.child("mobileNumber").getValue(String::class.java)
-                            ?: child.child("phone").getValue(String::class.java)
-                        val pin = child.child("pin").getValue(String::class.java)
+            val empRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("employees") else db.getReference("employees")
+            val pinRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("employeePins") else db.getReference("employeePins")
+            val appRef = if (companyId.isNotBlank() && companyId != "DEFAULT") db.getReference("companies").child(companyId).child("ApprovedDevices") else db.getReference("ApprovedDevices")
+
+            val cleanPhoneInput = phoneNumber.replace("+", "").replace("-", "").replace(" ", "")
+            val formattedPhoneInput = if (cleanPhoneInput.startsWith("0")) "+92" + cleanPhoneInput.substring(1) else if (!cleanPhoneInput.startsWith("92")) "+92$cleanPhoneInput" else "+$cleanPhoneInput"
+            val rawPhoneInput = if (cleanPhoneInput.startsWith("0")) cleanPhoneInput.substring(1) else if (cleanPhoneInput.startsWith("92")) cleanPhoneInput.substring(2) else cleanPhoneInput
+
+            // Check for existing name, phone, or PIN within this specific company to avoid duplicates
+            empRef.get().addOnSuccessListener { empSnap ->
+                pinRef.get().addOnSuccessListener { pinSnap ->
+                    appRef.get().addOnSuccessListener { appSnap ->
+                        var duplicateReason = ""
+
+                        fun checkDuplicate(child: DataSnapshot): String? {
+                            val name = child.child("employeeName").getValue(String::class.java)
+                                ?: child.child("name").getValue(String::class.java)
+                            val phone = child.child("phoneNumber").getValue(String::class.java)
+                                ?: child.child("mobileNumber").getValue(String::class.java)
+                                ?: child.child("phone").getValue(String::class.java)
+                            val pin = child.child("pin").getValue(String::class.java)
                             ?: child.child("attendancePin").getValue(String::class.java)
 
                         val isNameMatch = name != null && name.equals(employeeName, ignoreCase = true)
@@ -382,6 +595,7 @@ class AddEmployeeActivity : AppCompatActivity() {
                             binding.etPhoneNumber.text.clear()
                             generateNewPin()
                             binding.btnSaveEmployee.isEnabled = true
+                            refreshCompanyLimitsAndCounts()
                             if (isManageListVisible) loadManageList() // refresh if already open
                         }
                         .addOnFailureListener { e ->
@@ -399,6 +613,7 @@ class AddEmployeeActivity : AppCompatActivity() {
         }.addOnFailureListener { e ->
             showResult("Could not check employee list: ${e.message}", isError = true)
             binding.btnSaveEmployee.isEnabled = true
+        }
         }
     }
 

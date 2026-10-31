@@ -76,9 +76,9 @@ class CustomerBillingActivity : AppCompatActivity() {
         binding.btnMenu.setOnClickListener {
             startActivity(Intent(this, PaymentMethodSettingsActivity::class.java))
         }
-        binding.btnViewAllTransactions.setOnClickListener { showQuickPackageActivationDialog() }
-        binding.tvPackagesToday.setOnClickListener { showQuickPackageActivationDialog() }
-        (binding.tvPackagesToday.parent as? View)?.setOnClickListener { showQuickPackageActivationDialog() }
+        binding.btnViewAllTransactions.setOnClickListener { startActivity(Intent(this, QuickCustomerRechargeActivity::class.java)) }
+        binding.tvPackagesToday.setOnClickListener { startActivity(Intent(this, QuickCustomerRechargeActivity::class.java)) }
+        (binding.tvPackagesToday.parent as? View)?.setOnClickListener { startActivity(Intent(this, QuickCustomerRechargeActivity::class.java)) }
 
         // Unpaid Today = currently active Relief customers / currently
         // disabled (suspended) relief customers — see renderUnpaidTodayCard().
@@ -311,17 +311,16 @@ class CustomerBillingActivity : AppCompatActivity() {
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot == null) return@addSnapshotListener
 
+                val companyDocs = snapshot.documents.filter {
+                    CompanyDataHelper.belongsToCurrentCompany(this@CustomerBillingActivity, it)
+                }
+
                 allCustomerDocs.clear()
-                allCustomerDocs.addAll(snapshot.documents)
+                allCustomerDocs.addAll(companyDocs)
 
                 var active = 0
                 var disabled = 0
                 var activeRelief = 0
-                // NEW: live count of everyone currently DISABLED because of
-                // relief (reliefStatus == "SUSPENDED") — the same set shown
-                // in UnpaidPackageActivationActivity's "Disabled Users" list.
-                // Paired with activeRelief below to render the "X / Y" count
-                // on the Unpaid Today card.
                 var disabledRelief = 0
                 val speedCounts = mutableMapOf<String, Int>()
 
@@ -329,7 +328,7 @@ class CustomerBillingActivity : AppCompatActivity() {
                 packagePriceByCustomerId.clear()
                 packageIdByCustomerId.clear()
 
-                for (doc in snapshot.documents) {
+                for (doc in companyDocs) {
                     val packageId =
                         stringValue(doc, "packageId")
                             .ifEmpty { "Unknown" }
@@ -367,25 +366,16 @@ class CustomerBillingActivity : AppCompatActivity() {
                         stringValue(doc, "customerId")
                             .ifEmpty { doc.id }
 
-                    // Store both the Firestore document ID and the explicit
-                    // customerId so either transaction format can match.
-                    providerByCustomerId[customerId] =
-                        provider
-                    providerByCustomerId[doc.id] =
-                        provider
+                    providerByCustomerId[customerId] = provider
+                    providerByCustomerId[doc.id] = provider
 
-                    val packagePrice =
-                        numberValue(doc, "packagePrice")
+                    val packagePrice = numberValue(doc, "packagePrice")
 
-                    packagePriceByCustomerId[customerId] =
-                        packagePrice
-                    packagePriceByCustomerId[doc.id] =
-                        packagePrice
+                    packagePriceByCustomerId[customerId] = packagePrice
+                    packagePriceByCustomerId[doc.id] = packagePrice
 
-                    packageIdByCustomerId[customerId] =
-                        packageId
-                    packageIdByCustomerId[doc.id] =
-                        packageId
+                    packageIdByCustomerId[customerId] = packageId
+                    packageIdByCustomerId[doc.id] = packageId
                 }
 
                 binding.tvTotalAccounts.text =
@@ -542,7 +532,7 @@ class CustomerBillingActivity : AppCompatActivity() {
             .take(3)
 
         val colors = listOf("#378ADD", "#1D9E75", "#BA7517")
-        val total = speedCounts.values.sum().coerceAtLeast(1)
+        val realTotal = speedCounts.values.sum()
 
         val segments = entries.mapIndexed { i, e ->
             DonutChartView.Segment(
@@ -555,7 +545,7 @@ class CustomerBillingActivity : AppCompatActivity() {
 
         binding.donutChart.setData(
             segments,
-            total.toString()
+            realTotal.toString()
         )
 
         val labels = listOf(

@@ -21,10 +21,28 @@ object IspAccountResolver {
     }
 
     fun getActiveUsername(context: Context, isp: String, zone: String, requiredModule: String?): String? {
-        return IspPanelSettingsActivity.getSavedUsername(context, isp, zone, requiredModule)
+        val direct = IspPanelSettingsActivity.getSavedUsername(context, isp, zone, requiredModule)
+        if (!direct.isNullOrEmpty()) return direct
+
+        val canonicalZone = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(zone)
+        if (!canonicalZone.equals(zone, ignoreCase = true)) {
+            val canonicalUser = IspPanelSettingsActivity.getSavedUsername(context, isp, canonicalZone, requiredModule)
+            if (!canonicalUser.isNullOrEmpty()) return canonicalUser
+        }
+
+        return IspPanelSettingsActivity.getSavedAccount(context, isp, "ALL", requiredModule)?.first
     }
 
     fun getActivePassword(context: Context, isp: String, zone: String, requiredModule: String?): String? {
-        return IspPanelSettingsActivity.getSavedPassword(context, isp, zone, requiredModule)
+        val direct = IspPanelSettingsActivity.getSavedPassword(context, isp, zone, requiredModule)
+        if (!direct.isNullOrEmpty()) return direct
+
+        val canonicalZone = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(zone)
+        if (!canonicalZone.equals(zone, ignoreCase = true)) {
+            val canonicalPass = IspPanelSettingsActivity.getSavedPassword(context, isp, canonicalZone, requiredModule)
+            if (!canonicalPass.isNullOrEmpty()) return canonicalPass
+        }
+
+        return IspPanelSettingsActivity.getSavedAccount(context, isp, "ALL", requiredModule)?.second
     }
 }

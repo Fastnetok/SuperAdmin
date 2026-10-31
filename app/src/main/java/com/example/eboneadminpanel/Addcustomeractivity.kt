@@ -613,10 +613,38 @@ class AddCustomerActivity : AppCompatActivity() {
 
         binding.btnSaveCustomer.isEnabled = false
 
-        db.collection(customersCollection)
-            .document(customerId)
-            .get()
-            .addOnSuccessListener { existing ->
+        val currentCompanyId = CompanyDataHelper.getCurrentCompanyId(this) ?: "OKA001"
+        db.collection("companies").document(currentCompanyId).get()
+            .addOnSuccessListener { compDoc ->
+                val maxCust = compDoc.getLong("maxCustomers")?.toInt() ?: 100
+
+                db.collection(customersCollection).get()
+                    .addOnSuccessListener { custSnap ->
+                        var currentCustCount = 0
+                        for (d in custSnap.documents) {
+                            val comp = d.getString("companyId") ?: d.getString("company") ?: d.getString("zone")
+                            if (comp != null && (comp.equals(currentCompanyId, true) || comp.equals(currentCompanyId.replace("-", ""), true))) {
+                                currentCustCount++
+                            }
+                        }
+
+                        if (currentCustCount >= maxCust) {
+                            val remaining = (maxCust - currentCustCount).coerceAtLeast(0)
+                            showResult(
+                                "❌ Customer License Limit Reached!\n\n" +
+                                        "Super Admin has allowed a maximum limit of $maxCust Customer(s) for Company '$currentCompanyId'.\n" +
+                                        "📊 Registered: $currentCustCount / $maxCust | Remaining Quota: $remaining\n\n" +
+                                        "💡 Limit full! You cannot add more Customers. Please contact Super Admin to upgrade your customer license limit.",
+                                isError = true
+                            )
+                            binding.btnSaveCustomer.isEnabled = true
+                            return@addOnSuccessListener
+                        }
+
+                        db.collection(customersCollection)
+                            .document(customerId)
+                            .get()
+                            .addOnSuccessListener { existing ->
 
                 if (existing.exists()) {
 
@@ -752,6 +780,12 @@ class AddCustomerActivity : AppCompatActivity() {
 
                 binding.btnSaveCustomer
                     .isEnabled = true
+            }
+                    }.addOnFailureListener {
+                        binding.btnSaveCustomer.isEnabled = true
+                    }
+            }.addOnFailureListener {
+                binding.btnSaveCustomer.isEnabled = true
             }
     }
 

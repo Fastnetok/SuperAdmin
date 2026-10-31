@@ -114,6 +114,12 @@ class WateenWebViewActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.loginWebView)
 
+        val activeComp = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: targetZone
+        val cleanComp = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(activeComp)
+        findViewById<TextView>(R.id.tvHeaderTitle)?.text = "Wateen ($cleanComp)"
+
         val switchButton = findViewById<Button>(R.id.accountSwitchButton)
         if (wateenManualStepMode) {
             switchButton.text = "Next Step ▶"
@@ -383,8 +389,19 @@ class WateenWebViewActivity : AppCompatActivity() {
                 }
             }
         }
-        Log.d(TAG, "No credentials found for auto-login")
-        loginAttemptInProgress = false
+
+        // Cloud sync fallback: If no local credentials found, sync from Firebase and retry
+        IspPanelSettingsActivity.autoSyncCloudAccountsToLocal(this) {
+            val retryU = IspAccountResolver.getActiveUsername(this, "WATEEN", targetZone, reqModule)
+            val retryP = IspAccountResolver.getActivePassword(this, "WATEEN", targetZone, reqModule)
+            if (!retryU.isNullOrEmpty() && !retryP.isNullOrEmpty()) {
+                Log.d(TAG, "Logging in with cloud-synced ISP credentials ($retryU)")
+                doLoginWith(retryU, retryP)
+            } else {
+                Log.d(TAG, "No credentials found for auto-login after cloud sync")
+                loginAttemptInProgress = false
+            }
+        }
     }
 
     private fun escapeJs(v: String): String =

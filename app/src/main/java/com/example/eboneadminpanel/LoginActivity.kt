@@ -8,6 +8,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
+import java.util.Locale
 import com.example.superadmin.core.RoleManager
 import com.example.superadmin.core.SessionManager
 import com.google.firebase.auth.FirebaseAuth
@@ -30,21 +31,37 @@ class LoginActivity : AppCompatActivity() {
 
         emailInput = findViewById(R.id.emailInput)
         passwordInput = findViewById(R.id.passwordInput)
-        passwordInput.setText("12345678")
         loginButton = findViewById(R.id.loginButton)
         statusText = findViewById(R.id.statusText)
 
         loginButton.setOnClickListener {
-            val email = emailInput.text.toString().trim().lowercase()
+            val email = emailInput.text.toString().trim().lowercase(Locale.getDefault())
             val password = passwordInput.text.toString().trim()
 
-            if (email.isEmpty() || password.isEmpty()) {
-                statusText.text = "Email aur password dono likhein"
+            if (email.isEmpty() && password.isEmpty()) {
+                statusText.text = "Please enter Email, Phone, or 6-Digit PIN"
                 return@setOnClickListener
             }
 
             loginButton.isEnabled = false
             statusText.text = "Signing in..."
+
+            val cleanEmail = email.replace("+", "").replace("-", "").replace(" ", "")
+            val cleanPass = password.trim()
+            val isPinOrPhone = (cleanEmail.length == 6 && cleanEmail.all { it.isDigit() }) ||
+                    (cleanPass.length == 6 && cleanPass.all { it.isDigit() }) ||
+                    (!email.contains("@") && cleanEmail.length >= 6)
+
+            if (isPinOrPhone) {
+                checkStaffPinLogin(email, password, Exception("PIN or Phone authentication failed"))
+                return@setOnClickListener
+            }
+
+            if (email.isEmpty() || password.isEmpty()) {
+                statusText.text = "Please enter Email and Password"
+                loginButton.isEnabled = true
+                return@setOnClickListener
+            }
 
             auth.signInWithEmailAndPassword(email, password)
                 .addOnSuccessListener { result ->
@@ -78,21 +95,118 @@ class LoginActivity : AppCompatActivity() {
                         if (matched != null) {
                             processCompanyLogin(matched, email, password)
                         } else {
-                            loginButton.isEnabled = true
-                            statusText.text = "Login fail: ${authError.message}"
+                            checkStaffPinLogin(email, password, authError)
                         }
                     }.addOnFailureListener {
-                        loginButton.isEnabled = true
-                        statusText.text = "Login fail: ${authError.message}"
+                        checkStaffPinLogin(email, password, authError)
                     }
                     return@addOnSuccessListener
                 }
                 processCompanyLogin(companyDoc, email, password)
             }
             .addOnFailureListener {
-                loginButton.isEnabled = true
-                statusText.text = "Login fail: ${authError.message}"
+                checkStaffPinLogin(email, password, authError)
             }
+    }
+
+    private fun checkStaffPinLogin(input: String, pinOrPass: String, authError: Exception) {
+        val cleanInput = input.trim().replace("+", "").replace("-", "").replace(" ", "")
+        val cleanPin = pinOrPass.trim()
+
+        val targetPin = if (cleanPin.length == 6 && cleanPin.all { it.isDigit() }) {
+            cleanPin
+        } else if (cleanInput.length == 6 && cleanInput.all { it.isDigit() }) {
+            cleanInput
+        } else {
+            cleanPin.ifBlank { cleanInput }
+        }
+
+        val rtdb = com.google.firebase.database.FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
+
+        rtdb.getReference("employeePins").child(targetPin).get().addOnSuccessListener { pinSnap ->
+            if (pinSnap.exists()) {
+                processStaffPinSnapshot(targetPin, pinSnap)
+            } else {
+                rtdb.getReference("companies").get().addOnSuccessListener { compSnap ->
+                    var foundSnap: com.google.firebase.database.DataSnapshot? = null
+                    var foundCompId = ""
+                    for (cChild in compSnap.children) {
+                        val pChild = cChild.child("employeePins").child(targetPin)
+                        if (pChild.exists()) {
+                            foundSnap = pChild
+                            foundCompId = cChild.key.orEmpty()
+                            break
+                        }
+                    }
+
+                    if (foundSnap != null) {
+                        processStaffPinSnapshot(targetPin, foundSnap, foundCompId)
+                    } else {
+                        checkFirestoreStaffPinLogin(targetPin, authError)
+                    }
+                }.addOnFailureListener {
+                    checkFirestoreStaffPinLogin(targetPin, authError)
+                }
+            }
+        }.addOnFailureListener {
+            checkFirestoreStaffPinLogin(targetPin, authError)
+        }
+    }
+
+    private fun processStaffPinSnapshot(pin: String, snap: com.google.firebase.database.DataSnapshot, compIdOverride: String = "") {
+        val roleRaw = snap.child("role").getValue(String::class.java)
+            ?: snap.child("designation").getValue(String::class.java)
+            ?: "employee"
+        val role = roleRaw.lowercase()
+        val companyId = snap.child("companyId").getValue(String::class.java)
+            ?: snap.child("company").getValue(String::class.java)
+            ?: compIdOverride
+        val status = snap.child("status").getValue(String::class.java) ?: "ACTIVE"
+        val name = snap.child("employeeName").getValue(String::class.java)
+            ?: snap.child("name").getValue(String::class.java)
+            ?: "Staff Member"
+
+        if (status.uppercase() == "BLOCKED") {
+            loginButton.isEnabled = true
+            statusText.text = "Login fail: Account for $name is blocked"
+            return
+        }
+
+        val mappedRole = when (role) {
+            "manager" -> com.example.superadmin.core.Constants.ROLE_MANAGER
+            "supervisor" -> com.example.superadmin.core.Constants.ROLE_SUPERVISOR
+            "company_admin", "owner", "admin" -> com.example.superadmin.core.Constants.ROLE_COMPANY_ADMIN
+            else -> com.example.superadmin.core.Constants.ROLE_EMPLOYEE
+        }
+
+        SessionManager(this).saveSession(pin, mappedRole, companyId)
+        Toast.makeText(this, "✅ Welcome $name (${mappedRole.uppercase()})", Toast.LENGTH_SHORT).show()
+        proceedToNextScreen()
+    }
+
+    private fun checkFirestoreStaffPinLogin(pin: String, authError: Exception) {
+        db.collection("employeePins").document(pin).get().addOnSuccessListener { doc ->
+            if (doc.exists()) {
+                val role = doc.getString("role")?.lowercase() ?: "employee"
+                val compId = doc.getString("companyId") ?: ""
+                val name = doc.getString("employeeName") ?: "Staff Member"
+                val mappedRole = when (role) {
+                    "manager" -> com.example.superadmin.core.Constants.ROLE_MANAGER
+                    "supervisor" -> com.example.superadmin.core.Constants.ROLE_SUPERVISOR
+                    "company_admin", "owner" -> com.example.superadmin.core.Constants.ROLE_COMPANY_ADMIN
+                    else -> com.example.superadmin.core.Constants.ROLE_EMPLOYEE
+                }
+                SessionManager(this).saveSession(pin, mappedRole, compId)
+                Toast.makeText(this, "✅ Welcome $name (${mappedRole.uppercase()})", Toast.LENGTH_SHORT).show()
+                proceedToNextScreen()
+            } else {
+                loginButton.isEnabled = true
+                statusText.text = "Login fail: Invalid credentials or PIN (${authError.message})"
+            }
+        }.addOnFailureListener {
+            loginButton.isEnabled = true
+            statusText.text = "Login fail: ${authError.message}"
+        }
     }
 
     private fun processCompanyLogin(
@@ -209,13 +323,19 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun ensureAdminAndProceed(uid: String?) {
+        val sessionManager = SessionManager(this)
+        if (sessionManager.isLoggedIn() && !sessionManager.getUserRole().isNullOrBlank()) {
+            proceedToNextScreen()
+            return
+        }
+
         if (uid == null) {
             statusText.text = "Login failed, try again"
             loginButton.isEnabled = true
             return
         }
 
-        RoleManager.checkCurrentUserRole(object : RoleManager.RoleCheckCallback {
+        RoleManager.checkCurrentUserRole(this, object : RoleManager.RoleCheckCallback {
             override fun onRoleFound(role: String, companyId: String?) {
                 SessionManager(this@LoginActivity).saveSession(uid, role, companyId)
                 proceedToNextScreen()
@@ -242,11 +362,22 @@ class LoginActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        val sessionManager = SessionManager(this)
+        if (sessionManager.isLoggedIn() && !sessionManager.getUserRole().isNullOrBlank()) {
+            if (SetPinActivity.isPinSet(this)) {
+                startActivity(Intent(this, UnlockActivity::class.java))
+                finish()
+            } else {
+                proceedToNextScreen()
+            }
+            return
+        }
+
         val currentUser = auth.currentUser
         val uid = currentUser?.uid
 
         if (uid != null) {
-            RoleManager.checkCurrentUserRole(object : RoleManager.RoleCheckCallback {
+            RoleManager.checkCurrentUserRole(this, object : RoleManager.RoleCheckCallback {
                 override fun onRoleFound(role: String, companyId: String?) {
                     SessionManager(this@LoginActivity).saveSession(uid, role, companyId)
                     if (SetPinActivity.isPinSet(this@LoginActivity)) {

@@ -68,17 +68,18 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             eboneChecking = false
             wateenChecking = false
             zongChecking = false
-            loadComplaints(employeeName)
-            swipeRefreshLayout.isRefreshing = false
+            loadComplaints(employeeName) {
+                swipeRefreshLayout.isRefreshing = false
+            }
         }
 
         loadComplaints(employeeName)
     }
 
-    private fun loadComplaints(employeeName: String) {
+    private fun loadComplaints(employeeName: String, onDone: () -> Unit = {}) {
         val targetNorm = employeeName.trim().lowercase(Locale.getDefault())
         FirebaseDatabase.getInstance().getReference("complaints")
-            .addValueEventListener(object : ValueEventListener {
+            .addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     complaintList.clear()
                     for (item in snapshot.children) {
@@ -95,9 +96,12 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                     adapter.notifyDataSetChanged()
                     allFinishedBeepPlayed = false
                     startCheckingQueues()
+                    onDone()
                 }
 
-                override fun onCancelled(error: DatabaseError) {}
+                override fun onCancelled(error: DatabaseError) {
+                    onDone()
+                }
             })
     }
 
@@ -364,7 +368,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
 
         val loginUrl = "https://panel.wateen.com/auth.html"
         val onlineUrl = "https://panel.wateen.com/user/user/online"
-        val searchSelector = "input[aria-controls=\"allonlineUsers\"]"
+        val searchSelector = "input[aria-controls=\"userListOnline\"], input[aria-controls=\"allonlineUsers\"], .dataTables_filter input, input[type=search], #search"
 
         val webView = getOrCreateWateenWebView()
 
@@ -435,7 +439,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl(initialUrl)
+        webView.loadUrl(loginUrl)
     }
 
     private fun processNextZong() {

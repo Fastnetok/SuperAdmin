@@ -110,6 +110,12 @@ class EboneWebViewActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.loginWebView)
 
+        val activeComp = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: targetZone
+        val cleanComp = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(activeComp)
+        findViewById<TextView>(R.id.tvHeaderTitle)?.text = "Ebone ($cleanComp)"
+
         findViewById<Button>(R.id.accountSwitchButton).apply {
             text = "🚪 Logout / Switch"
             setOnClickListener {
@@ -384,8 +390,16 @@ class EboneWebViewActivity : AppCompatActivity() {
             return
         }
 
-        // DO NOT auto-login, just wait on the loaded login page.
-        loginAttemptInProgress = false
+        // Cloud sync fallback if credentials missing locally
+        IspPanelSettingsActivity.autoSyncCloudAccountsToLocal(this) {
+            val retryU = IspAccountResolver.getActiveUsername(this, "EBONE", targetZone, reqModule)?.takeIf { it.isNotBlank() }
+            val retryP = IspAccountResolver.getActivePassword(this, "EBONE", targetZone, reqModule)?.takeIf { it.isNotBlank() }
+            if (!retryU.isNullOrBlank() && !retryP.isNullOrBlank()) {
+                doLoginWith(retryU, retryP)
+            } else {
+                loginAttemptInProgress = false
+            }
+        }
     }
 
     private fun escapeJs(v: String): String =
@@ -730,6 +744,7 @@ class EboneWebViewActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
             }
 
+            manualAction = "CHECK_BALANCE"
             val smsId = sourceTransactionId?.takeIf { it.isNotBlank() }
             if (smsId != null) {
                 db.collection("dealerTransactions").document(smsId).update(mapOf("status" to "COMPLETED", "transferStatus" to "TRANSFERRED", "transferredAt" to System.currentTimeMillis(), "transferResultText" to clean.take(500)))

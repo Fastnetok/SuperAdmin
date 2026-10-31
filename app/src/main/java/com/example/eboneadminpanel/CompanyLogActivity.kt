@@ -90,6 +90,18 @@ class CompanyLogActivity : AppCompatActivity() {
     private var availableCompanies = listOf("All Companies")
     private var selectedCompanyFilter = "All Companies"
 
+    override fun onResume() {
+        super.onResume()
+        val activeCompRaw = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+        if (!activeCompRaw.isNullOrBlank() && activeCompRaw.uppercase() != "ALL" && availableCompanies.isNotEmpty()) {
+            val matchIdx = availableCompanies.indexOfFirst { it.equals(activeCompRaw, ignoreCase = true) || it.contains(activeCompRaw, ignoreCase = true) }
+            if (matchIdx >= 0 && ::spinnerCompanyFilter.isInitialized) {
+                selectedCompanyFilter = availableCompanies[matchIdx]
+                spinnerCompanyFilter.setSelection(matchIdx)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val currentUserEmail = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email?.trim()?.lowercase()
@@ -298,6 +310,14 @@ class CompanyLogActivity : AppCompatActivity() {
             }
             availableCompanies = companiesList.toList().sorted()
 
+            val activeCompRaw = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            if (!activeCompRaw.isNullOrBlank() && activeCompRaw.uppercase() != "ALL") {
+                val matchIdx = availableCompanies.indexOfFirst { it.equals(activeCompRaw, ignoreCase = true) || it.contains(activeCompRaw, ignoreCase = true) }
+                if (matchIdx >= 0) {
+                    selectedCompanyFilter = availableCompanies[matchIdx]
+                }
+            }
+
             val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, availableCompanies)
             spinnerCompanyFilter.adapter = spinnerAdapter
             val spinnerIdx = availableCompanies.indexOf(selectedCompanyFilter).coerceAtLeast(0)
@@ -306,6 +326,8 @@ class CompanyLogActivity : AppCompatActivity() {
             spinnerCompanyFilter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
                     selectedCompanyFilter = availableCompanies[position]
+                    val compToSave = if (selectedCompanyFilter.contains("ALL", ignoreCase = true)) "ALL" else selectedCompanyFilter
+                    com.example.superadmin.core.SessionManager(this@CompanyLogActivity).saveActiveCompany(compToSave)
                     if (currentTab == Tab.USAGE_ANALYTICS) renderLogs()
                 }
                 override fun onNothingSelected(parent: AdapterView<*>) {}

@@ -119,6 +119,9 @@ class EboneAdminApp : Application() {
         db = FirebaseDatabase.getInstance("https://superadmin-9a853-default-rtdb.firebaseio.com")
         createNotificationChannel()
 
+        // Sync cloud ISP panel accounts to local device SharedPreferences on app startup
+        IspPanelSettingsActivity.autoSyncCloudAccountsToLocal(this)
+
         // NEW: start the foreground auto-disable poll loop. It self
         // -reschedules forever; the body only does real work while
         // foregroundActivity is non-null (app actually on screen).

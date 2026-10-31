@@ -1,54 +1,147 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="32dp">
+    android:fillViewport="true"
+    android:background="#F5F7FA">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="SuperAdmin Login"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="24dp" />
-
-    <EditText
-        android:id="@+id/emailInput"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Email"
-        android:inputType="textEmailAddress" />
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="28dp">
 
-    <EditText
-        android:id="@+id/passwordInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Password"
-        android:inputType="textPassword"
-        android:layout_marginTop="12dp" />
+        <ImageView
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:src="@drawable/ic_launcher_foreground"
+            android:contentDescription="Logo"
+            android:layout_marginBottom="12dp" />
 
-    <Button
-        android:id="@+id/loginButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Login"
-        android:layout_marginTop="16dp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SuperAdmin Suite"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#1A237E" />
 
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:textColor="#D32F2F" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Admin &amp; Staff Login Portal"
+            android:textSize="14sp"
+            android:textColor="#5C6BC0"
+            android:layout_marginBottom="28dp" />
 
-    <TextView
-        android:id="@+id/forgotPasswordText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Password bhool gaye?"
-        android:textColor="#1565C0"
-        android:layout_marginTop="16dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#FFFFFF"
+            android:padding="20dp"
+            android:elevation="4dp">
 
-</LinearLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Account Login"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#37474F"
+                android:layout_marginBottom="16dp" />
+
+            <EditText
+                android:id="@+id/emailInput"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:hint="Email / Mobile No. / 6-Digit PIN"
+                android:inputType="textEmailAddress"
+                android:background="@android:drawable/editbox_background"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textSize="15sp" />
+
+            <EditText
+                android:id="@+id/passwordInput"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:hint="Password (Leave empty if using PIN)"
+                android:inputType="textPassword"
+                android:background="@android:drawable/editbox_background"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textSize="15sp"
+                android:layout_marginTop="12dp" />
+
+            <Button
+                android:id="@+id/loginButton"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:text="LOGIN TO DASHBOARD"
+                android:textStyle="bold"
+                android:textSize="15sp"
+                android:backgroundTint="#1A237E"
+                android:textColor="#FFFFFF"
+                android:layout_marginTop="20dp" />
+
+            <TextView
+                android:id="@+id/statusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginTop="12dp"
+                android:textColor="#D32F2F"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/forgotPasswordText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="Password bhool gaye?"
+                android:textColor="#1565C0"
+                android:textSize="14sp"
+                android:layout_marginTop="16dp" />
+
+        </LinearLayout>
+
+        <!-- Instructions Box for Users -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#E8EAF6"
+            android:padding="16dp"
+            android:layout_marginTop="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="💡 How to Login:"
+                android:textStyle="bold"
+                android:textColor="#1A237E"
+                android:textSize="14sp"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="• SuperAdmin / City Admin: Enter Email &amp; Password"
+                android:textColor="#37474F"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="• Manager / Supervisor / Staff: Enter your 6-Digit PIN"
+                android:textColor="#37474F"
+                android:textSize="13sp"
+                android:layout_marginTop="4dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</ScrollView>

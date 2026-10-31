@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebStorage
@@ -118,6 +119,12 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         window.decorView.systemUiVisibility = 0
 
         webView = findViewById(R.id.loginWebView)
+
+        val activeComp = com.example.superadmin.core.SessionManager(this).getActiveCompanyId()
+            ?: com.example.superadmin.core.CompanyDataHelper.getCurrentCompanyId(this)
+            ?: "REN-001"
+        val cleanComp = com.example.superadmin.core.CompanyDataHelper.getCanonicalDocId(activeComp)
+        findViewById<TextView>(R.id.tvHeaderTitle)?.text = "Zong ($cleanComp)"
         findViewById<Button>(R.id.accountSwitchButton).setOnClickListener {
             showAccountListDialog()
         }
@@ -152,14 +159,29 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             }, "TapInspector")
         }
 
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                if (message != null && (message.contains("Data Tables", ignoreCase = true) || message.contains("DataTables", ignoreCase = true) || message.contains("Invalid JSON", ignoreCase = true))) {
+                    result?.confirm()
+                    return true
+                }
+                return super.onJsAlert(view, url, message, result)
+            }
+        }
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                webView.evaluateJavascript("(function(){ window.alert = function(m){ console.log('Suppressed alert: ' + m); }; if (window.jQuery && $.fn && $.fn.dataTable) { $.fn.dataTable.ext.errMode = 'none'; } })()", null)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (url.isNullOrBlank()) return
 
                 CookieManager.getInstance().flush()
+
+                webView.evaluateJavascript("(function(){ window.alert = function(m){ console.log('Suppressed alert: ' + m); }; if (window.jQuery && $.fn && $.fn.dataTable) { $.fn.dataTable.ext.errMode = 'none'; } })()", null)
 
                 handlePage(url)
 
@@ -320,18 +342,25 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             return
         }
 
+        val safeU = jsEscape(username)
+        val safeP = jsEscape(password)
+
         webView.evaluateJavascript(
             "(function(){" +
-                    "var u=document.querySelector('input[name=username],#username');" +
-                    "var p=document.querySelector('input[name=password],#password');" +
-                    "var b=document.querySelector('button[type=submit],#send,.btn-login');" +
-                    "if(!u||!p)return 'not_ready';" +
-                    "u.value=''; p.value='';" +
-                    "u.value='${jsEscape(username)}'; p.value='${jsEscape(password)}';" +
-                    "u.dispatchEvent(new Event('input', { bubbles: true }));" +
-                    "p.dispatchEvent(new Event('input', { bubbles: true }));" +
-                    "if(b){ b.click(); return 'submitted'; }" +
-                    "return 'no_button';" +
+                    "  var u=document.querySelector('input[type=text],input[name=username],input[name=email],#username,#email');" +
+                    "  var p=document.querySelector('input[type=password],#password');" +
+                    "  var b=document.querySelector('#send,button[type=submit],input[type=submit],.btn-login,#login-btn,button');" +
+                    "  if(!u||!p)return 'not_ready';" +
+                    "  u.focus(); u.value='$safeU';" +
+                    "  u.dispatchEvent(new Event('input', { bubbles: true }));" +
+                    "  u.dispatchEvent(new Event('change', { bubbles: true }));" +
+                    "  p.focus(); p.value='$safeP';" +
+                    "  p.dispatchEvent(new Event('input', { bubbles: true }));" +
+                    "  p.dispatchEvent(new Event('change', { bubbles: true }));" +
+                    "  var captcha = document.querySelector('.g-recaptcha, [name*=\"captcha\"], #captcha, iframe[src*=\"captcha\"]');" +
+                    "  if(captcha){ return 'captcha_present'; }" +
+                    "  if(b){ b.click(); return 'submitted'; }" +
+                    "  return 'submitted';" +
                     "})()"
         ) { raw ->
             loginAttemptInProgress = false
@@ -344,6 +373,8 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                 } else {
                     fail("Zong Renala login fields were not found.")
                 }
+            } else if (result.contains("captcha_present")) {
+                Toast.makeText(this, "⚠️ Zong Captcha detected! Please complete Captcha on screen to sign in.", Toast.LENGTH_LONG).show()
             } else if (result.contains("submitted")) {
                 loginSubmitted = true
                 loginDone = true
@@ -388,7 +419,6 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             } else if (attempt < 10) {
                 webView.postDelayed({ readRenalaBalance(attempt + 1) }, 1000)
             } else {
-                Toast.makeText(this, "Zong Renala balance could not be read.", Toast.LENGTH_SHORT).show()
                 setResult(RESULT_CANCELED)
                 finish()
             }
@@ -562,7 +592,6 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
     }
 
     private fun fail(reason: String) {
-        Toast.makeText(this, reason, Toast.LENGTH_LONG).show()
         setResult(RESULT_CANCELED)
         finish()
     }
