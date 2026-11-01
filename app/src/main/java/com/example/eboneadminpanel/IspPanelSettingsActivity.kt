@@ -568,6 +568,24 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         showBiometricAuthentication()
     }
 
+    override fun onResume() {
+        super.onResume()
+        val filterSpinner = findViewById<Spinner>(R.id.companyFilterSpinner)
+        val activeComp = SessionManager(this).getActiveCompanyId()
+        if (filterSpinner != null && activeComp != null && filterSpinner.adapter != null) {
+            val adapter = filterSpinner.adapter
+            for (i in 0 until adapter.count) {
+                val item = adapter.getItem(i)?.toString()
+                if (item != null && item.equals(activeComp, true)) {
+                    if (filterSpinner.selectedItemPosition != i) {
+                        filterSpinner.setSelection(i, false)
+                    }
+                    break
+                }
+            }
+        }
+    }
+
     private fun showBiometricAuthentication() {
         val biometricManager = androidx.biometric.BiometricManager.from(this)
         val authenticators = androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG or androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
@@ -748,9 +766,14 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             android.R.layout.simple_spinner_dropdown_item,
             items
         )
+        val activeComp = SessionManager(this).getActiveCompanyId() ?: items.firstOrNull() ?: "ALL"
+        val idx = items.indexOfFirst { it.equals(activeComp, true) }.coerceAtLeast(0)
+        spinner.setSelection(idx, false)
+
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selected = items[position]
+                SessionManager(this@IspPanelSettingsActivity).saveActiveCompany(selected)
                 val compId = if (selected.startsWith("ALL")) null else selected
                 loadAccountsUI(compId)
             }
