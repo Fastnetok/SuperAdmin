@@ -302,17 +302,24 @@ class OfficeTimmingsActivity : AppCompatActivity() {
     private fun showTimePicker(type: String) {
         val dp = resources.displayMetrics.density
         val isStart = type == "start"
-        val currentHour = if (isStart) startHour else endHour
+        val currentHour24 = if (isStart) startHour else endHour
         val currentMin = if (isStart) startMinute else endMinute
+
+        val initialIsPm = currentHour24 >= 12
+        val initialH12 = when {
+            currentHour24 == 0 -> 12
+            currentHour24 > 12 -> currentHour24 - 12
+            else -> currentHour24
+        }
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
             setPadding(px(24,dp), px(16,dp), px(24,dp), px(8,dp))
         }
         val hourPicker = NumberPicker(this).apply {
-            minValue = 0; maxValue = 23
-            displayedValues = (0..23).map { String.format("%02d", it) }.toTypedArray()
-            value = currentHour
+            minValue = 1; maxValue = 12
+            displayedValues = (1..12).map { it.toString() }.toTypedArray()
+            value = initialH12
         }
         val sep = tv(" : ", 18f, Color.parseColor("#333333"), bold = true)
         val minPicker = NumberPicker(this).apply {
@@ -320,14 +327,41 @@ class OfficeTimmingsActivity : AppCompatActivity() {
             displayedValues = (0..59).map { String.format("%02d", it) }.toTypedArray()
             value = currentMin
         }
-        layout.addView(hourPicker); layout.addView(sep); layout.addView(minPicker)
+        val amPmPicker = NumberPicker(this).apply {
+            minValue = 0; maxValue = 1
+            displayedValues = arrayOf("AM", "PM")
+            value = if (initialIsPm) 1 else 0
+        }
+        val sep2 = tv("   ", 18f, Color.parseColor("#333333"))
+
+        layout.addView(hourPicker)
+        layout.addView(sep)
+        layout.addView(minPicker)
+        layout.addView(sep2)
+        layout.addView(amPmPicker)
 
         AlertDialog.Builder(this)
             .setTitle(if (isStart) "Set Start Time" else "Set End Time")
             .setView(layout)
             .setPositiveButton("OK") { _, _ ->
-                if (isStart) { startHour = hourPicker.value; startMinute = minPicker.value; tvStartTime.text = formatTime(startHour, startMinute) }
-                else { endHour = hourPicker.value; endMinute = minPicker.value; tvEndTime.text = formatTime(endHour, endMinute) }
+                val h12 = hourPicker.value
+                val min = minPicker.value
+                val isPm = amPmPicker.value == 1
+
+                val hour24 = when {
+                    isPm -> if (h12 == 12) 12 else h12 + 12
+                    else -> if (h12 == 12) 0 else h12
+                }
+
+                if (isStart) {
+                    startHour = hour24
+                    startMinute = min
+                    tvStartTime.text = formatTime(startHour, startMinute)
+                } else {
+                    endHour = hour24
+                    endMinute = min
+                    tvEndTime.text = formatTime(endHour, endMinute)
+                }
             }
             .setNegativeButton("Cancel", null).show()
     }
